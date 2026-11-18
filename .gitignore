@@ -1,0 +1,10 @@
+node_modules
+.git-local/
+skills/
+.env
+google-credentials.json
+session_state.json
+logs/
+screenshots/
+output/
+*.png

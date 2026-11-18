@@ -1,0 +1,14 @@
+services:
+  agent:
+    build: .
+    container_name: rs_ge_agent
+    restart: unless-stopped
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
+    environment:
+      - NODE_ENV=production
+    stdin_open: true
+    tty: true

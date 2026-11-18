@@ -1,0 +1,25 @@
+{
+  "name": "rs-ge-agent",
+  "version": "1.0.0",
+  "description": "AI agent for rs.ge automation",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Morgunov-Vitaly/rs-ge-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Morgunov-Vitaly/rs-ge-agent/issues"
+  },
+  "homepage": "https://github.com/Morgunov-Vitaly/rs-ge-agent#readme",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0",
+    "playwright": "^1.42.0",
+    "telegraf": "^4.16.3"
+  }
+}
