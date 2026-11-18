@@ -31,6 +31,9 @@ test('configuration is structured and validated by scope', () => {
     });
 
     assert.equal(config.telegram.token, 'test-token');
+    assert.match(config.rsGe.screenshotsDir, /screenshots[\\/]tmp$/);
+    assert.equal(config.runtime.retention.logMaxSizeBytes, 10 * 1024 * 1024);
+    assert.equal(config.runtime.retention.screenshotTtlHours, 24);
     assert.doesNotThrow(() => assertConfig(config, ['telegram', 'google']));
     assert.throws(() => assertConfig(config, ['rsge']), /RS_USERNAME, RS_PASSWORD/);
 });

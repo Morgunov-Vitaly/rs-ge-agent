@@ -1,6 +1,6 @@
 {
   "name": "rs-ge-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AI agent for rs.ge automation",
   "license": "AGPL-3.0-only",
   "repository": {
@@ -16,6 +16,8 @@
     "start": "node index.js",
     "test": "node --test",
     "test:contract": "node --test test/rsge-browser-contract.test.js",
+    "cleanup:dry": "node scripts/cleanup.js --dry-run",
+    "cleanup": "node scripts/cleanup.js",
     "check:syntax": "node scripts/check-syntax.js",
     "check:secrets": "node scripts/check-secrets.js",
     "check": "npm run check:syntax && npm run check:secrets"

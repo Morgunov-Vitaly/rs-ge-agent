@@ -5,8 +5,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const { config } = require('../config');
+const { appendRotatingFile } = require('../infrastructure/file-rotation');
 
-const LOGS_DIR = path.resolve(__dirname, '../logs');
+const LOGS_DIR = config.runtime.logsDir;
 
 if (!fs.existsSync(LOGS_DIR)) {
     fs.mkdirSync(LOGS_DIR, { recursive: true });
@@ -24,9 +26,14 @@ function writeToFile(filePath, level, message, meta) {
     const metaStr = meta ? ` | ${typeof meta === 'object' ? JSON.stringify(meta) : meta}` : '';
     const line = `[${time}] [${level.toUpperCase()}] ${message}${metaStr}\n`;
 
-    fs.appendFile(filePath, line, (err) => {
-        if (err) console.error('Не удалось записать в лог-файл:', err.message);
-    });
+    try {
+        appendRotatingFile(filePath, line, {
+            maxBytes: config.runtime.retention.logMaxSizeBytes,
+            rotationIntervalMs: config.runtime.retention.logRotationHours * 60 * 60 * 1000
+        });
+    } catch (err) {
+        console.error('Не удалось записать в лог-файл:', err.message);
+    }
 }
 
 const logger = {

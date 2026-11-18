@@ -10,5 +10,10 @@ services:
       - ./screenshots:/app/screenshots
     environment:
       - NODE_ENV=production
+    logging:
+      driver: json-file
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCKER_LOG_MAX_FILES:-5}
     stdin_open: true
     tty: true

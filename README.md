@@ -68,7 +68,7 @@
 
 Критичные селекторы RS.GE проверяются браузерными контрактными тестами на обезличенных HTML-фикстурах. Они не обращаются к реальному аккаунту и не содержат персональных данных.
 
-Автоматическая ротация логов и TTL-очистка временных скриншотов включены в P1 roadmap, но в текущей версии еще не реализованы.
+Автоматическая ротация логов и TTL-очистка временных скриншотов реализованы начиная с `v0.2.0`. Audit log и явно сохраненные evidence artifacts имеют отдельную политику хранения.
 
 ---
 
@@ -99,7 +99,17 @@ GOOGLE_CREDENTIALS_PATH=./google-credentials.json
 # Необязательные пути runtime
 RS_SESSION_STORAGE_PATH=./session_state.json
 RS_SCREENSHOTS_DIR=./screenshots
+RS_SCREENSHOTS_TMP_DIR=./screenshots/tmp
+RS_EVIDENCE_DIR=./screenshots/evidence
+LOGS_DIR=./logs
 AUDIT_LOG_PATH=./logs/audit.jsonl
+
+# Retention
+LOG_MAX_SIZE_MB=10
+LOG_RETENTION_DAYS=14
+SCREENSHOT_TTL_HOURS=24
+SCREENSHOT_MAX_SIZE_MB=250
+CLEANUP_INTERVAL_MINUTES=60
 ```
 
 ### 2. Запуск через Docker Compose
@@ -113,6 +123,20 @@ docker compose build
 # Запуск в интерактивном режиме
 docker compose run --rm agent
 ```
+
+### 3. Проверка и ручная очистка runtime-файлов
+
+```bash
+# Показать, что будет удалено, без изменения файлов
+npm run cleanup:dry
+
+# Применить настроенную retention-политику
+npm run cleanup
+```
+
+Операционные `agent.log` и `error.log` ротируются по размеру и возрасту. Архивы по умолчанию хранятся 14 дней. Временные скриншоты сохраняются в `screenshots/tmp` и удаляются через 24 часа либо раньше при превышении квоты. `audit.jsonl` и `screenshots/evidence` общей очисткой не удаляются.
+
+Каталог `evidence` пока только изолирован от автоматического удаления; шифрованное сохранение подтверждений будет реализовано отдельным этапом. Docker stdout/stderr дополнительно ограничены параметрами `DOCKER_LOG_MAX_SIZE` и `DOCKER_LOG_MAX_FILES`.
 
 ---
 

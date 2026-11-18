@@ -7,7 +7,19 @@ function parseChatId(value) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parsePositiveNumber(value, fallback) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function megabytes(value, fallback) {
+    return Math.round(parsePositiveNumber(value, fallback) * 1024 * 1024);
+}
+
 function loadConfig(env = process.env) {
+    const screenshotsRootDir = path.resolve(env.RS_SCREENSHOTS_DIR || './screenshots');
+    const logsDir = path.resolve(env.LOGS_DIR || './logs');
+
     return Object.freeze({
         telegram: Object.freeze({
             token: env.TELEGRAM_BOT_TOKEN || '',
@@ -17,7 +29,9 @@ function loadConfig(env = process.env) {
             username: env.RS_USERNAME || '',
             password: env.RS_PASSWORD || '',
             sessionStoragePath: path.resolve(env.RS_SESSION_STORAGE_PATH || './session_state.json'),
-            screenshotsDir: path.resolve(env.RS_SCREENSHOTS_DIR || './screenshots'),
+            screenshotsRootDir,
+            screenshotsDir: path.resolve(env.RS_SCREENSHOTS_TMP_DIR || path.join(screenshotsRootDir, 'tmp')),
+            evidenceDir: path.resolve(env.RS_EVIDENCE_DIR || path.join(screenshotsRootDir, 'evidence')),
             chromiumExecutablePath: env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || ''
         }),
         google: Object.freeze({
@@ -25,7 +39,17 @@ function loadConfig(env = process.env) {
             credentialsPath: path.resolve(env.GOOGLE_CREDENTIALS_PATH || './google-credentials.json')
         }),
         runtime: Object.freeze({
-            auditLogPath: path.resolve(env.AUDIT_LOG_PATH || './logs/audit.jsonl')
+            logsDir,
+            auditLogPath: path.resolve(env.AUDIT_LOG_PATH || path.join(logsDir, 'audit.jsonl')),
+            retention: Object.freeze({
+                logMaxSizeBytes: megabytes(env.LOG_MAX_SIZE_MB, 10),
+                logRotationHours: parsePositiveNumber(env.LOG_ROTATION_HOURS, 24),
+                logRetentionDays: parsePositiveNumber(env.LOG_RETENTION_DAYS, 14),
+                logMaxTotalBytes: megabytes(env.LOG_MAX_TOTAL_SIZE_MB, 100),
+                screenshotTtlHours: parsePositiveNumber(env.SCREENSHOT_TTL_HOURS, 24),
+                screenshotMaxTotalBytes: megabytes(env.SCREENSHOT_MAX_SIZE_MB, 250),
+                cleanupIntervalMinutes: parsePositiveNumber(env.CLEANUP_INTERVAL_MINUTES, 60)
+            })
         })
     });
 }

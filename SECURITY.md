@@ -47,7 +47,7 @@ Only `READ_ONLY` actions may execute without explicit user confirmation. Future 
 - RS.GE credentials and browser session state are not yet encrypted by the application itself.
 - The current runtime is single-user.
 - Browser automation depends on the live RS.GE interface and must be treated as an untrusted external dependency.
-- Automated log rotation and screenshot TTL cleanup are planned but not implemented yet.
+- Evidence artifacts are isolated from automatic cleanup but are not encrypted by the application yet.
 - The planned Web UI does not yet have an authentication or session-security implementation.
 
 Do not operate a public multi-tenant service until these limitations are addressed and a threat model has been reviewed.

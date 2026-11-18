@@ -183,7 +183,7 @@ async function runFillFlow(ctx) {
 
         if (err.code !== 'USER_CANCELLED') {
             await ctx.reply(`❌ Ошибка при авторизации: ${err.message}`);
-            const errPath = path.resolve('./screenshots/error_step.png');
+            const errPath = path.join(config.rsGe.screenshotsDir, 'error_step.png');
             if (fs.existsSync(errPath)) {
                 await ctx.replyWithPhoto({ source: errPath });
             }
