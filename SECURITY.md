@@ -6,7 +6,7 @@ RS.GE Agent processes tax, identity and financial data. Treat every deployment a
 
 Do not publish credentials, cookies, SMS codes, taxpayer identifiers, bank data, screenshots or session files in a public issue.
 
-Until a dedicated security contact is configured, use the repository host's private vulnerability reporting feature. A public release must not be made before a private reporting channel is documented here.
+Use [GitHub private vulnerability reporting](https://github.com/Morgunov-Vitaly/rs-ge-agent/security/advisories/new). Never place sensitive evidence in a public issue.
 
 ## Secrets that must never be committed
 

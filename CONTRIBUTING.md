@@ -26,9 +26,17 @@ New business rules must not be added directly to Telegram handlers or Playwright
 
 ## Tests
 
-Run:
+Install dependencies and the browser once:
 
 ```bash
+npm ci
+npx playwright install chromium
+```
+
+Run the same checks as CI:
+
+```bash
+npm run check
 npm test
 ```
 
@@ -38,6 +46,8 @@ Required test levels:
 - contract tests for connector interfaces;
 - sanitized fixtures for RS.GE responses/DOM;
 - read-only browser smoke tests for critical portal flows.
+
+Browser contract tests use only sanitized HTML from `test/fixtures/rsge/`. Never capture a production page and commit it without manually removing names, taxpayer IDs, payment references, account numbers, cookies and embedded scripts containing session data.
 
 Tests and fixtures must not contain real TINs, names, bank references, cookies, passwords or Google document IDs.
 

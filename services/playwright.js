@@ -9,6 +9,11 @@ const path = require('path');
 const fs = require('fs');
 const logger = require('./logger');
 const { config, assertConfig } = require('../config');
+const {
+    detectLoginState,
+    readSmallBusinessDraftPage,
+    readPayerCardTable
+} = require('../connectors/rsge/page-readers');
 
 const SESSION_STORAGE_PATH = config.rsGe.sessionStoragePath;
 const SCREENSHOTS_DIR = config.rsGe.screenshotsDir;
@@ -46,6 +51,17 @@ async function launchBrowser(headless = true) {
 
     if (config.rsGe.chromiumExecutablePath) {
         launchOptions.executablePath = config.rsGe.chromiumExecutablePath;
+    } else {
+        // New Playwright versions prefer a separate headless-shell binary.
+        // Reuse the installed full Chromium build when the shell is absent.
+        const browserCandidates = [
+            chromium.executablePath(),
+            '/usr/bin/chromium',
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable'
+        ];
+        launchOptions.executablePath = browserCandidates.find((candidate) => fs.existsSync(candidate));
+        if (!launchOptions.executablePath) delete launchOptions.executablePath;
     }
 
     return await chromium.launch(launchOptions);
@@ -143,10 +159,8 @@ async function loginToRsGe(onSmsRequired) {
         // Форма может скрываться на время postback, поэтому даем странице
         // закончить отрисовку ошибки или личного кабинета.
         await page.waitForTimeout(1200);
-        const smsFieldVisible = await page.locator('#smsText').isVisible().catch(() => false);
-        const loginFieldVisible = await page.locator('#username').isVisible().catch(() => false);
-
-        if (smsFieldVisible || loginFieldVisible) {
+        const loginState = await detectLoginState(page);
+        if (loginState !== 'authenticated') {
             const rejectedPath = path.join(SCREENSHOTS_DIR, 'sms_rejected.png');
             await page.screenshot({ path: rejectedPath, fullPage: true });
             throw new Error('RS.GE не принял SMS-код или срок его действия истек. Запустите /fill заново.');
@@ -211,62 +225,19 @@ async function openExistingSmallBusinessDraft(page, year, month) {
 
     await page.getByRole('tab', { name: 'ყოველთვიური' }).click({ timeout: 30000 });
     await page.getByRole('cell', { name: SMALL_BUSINESS_TAX_NAME }).click();
-    await page.locator('#control_0_m input.d_value').waitFor({ state: 'attached', timeout: 15000 });
 
-    const selectedPeriod = await page.locator('#control_0_m input.d_value').inputValue();
-    if (selectedPeriod !== expectedPeriod) {
-        throw new Error(
-            `RS.GE открыл период ${selectedPeriod || 'неизвестно'}, ожидался ${expectedPeriod}. ` +
-            'Автоматическое переключение периода пока отключено для безопасности.'
-        );
-    }
-
-    const grid = page.locator('#control_0_g3g');
-    // Grid содержит скрытую template-строку с плейсхолдерами вида
-    // {$T.STATUS_TXT}; работаем только с реально отображаемой декларацией.
-    const viewButtons = grid.locator('img[src$="view.png"]:visible');
-    if (await viewButtons.count() === 0) {
+    const result = await readSmallBusinessDraftPage(page, expectedPeriod);
+    if (!result.exists) {
         logger.info(`Сохраненный черновик за ${expectedPeriod} не найден.`);
-        return { exists: false };
+        return result;
     }
-
-    const draftRow = viewButtons.first().locator('xpath=ancestor::tr[count(td) >= 5][1]');
-    const rowCells = await draftRow.locator('td').allInnerTexts();
-    const normalizedCells = rowCells.map((value) => value.trim()).filter(Boolean);
-    const rawStatus = normalizedCells.find((value) => /შენახულ|გაგზავნილ|sent/i.test(value)) ||
-        normalizedCells.find((value) => !value.includes('{$T.')) || '';
-    const status = rawStatus.includes('შენახული')
-        ? 'Сохранен'
-        : (rawStatus.includes('გაგზავნილი') ? 'Sent' : (rawStatus || 'Сохранен'));
-
-    await viewButtons.first().click();
-    const draftWindow = page.locator('.window_panel').filter({
-        has: page.locator('input[id$="_20"].decl_input_tb')
-    }).last();
-    await draftWindow.waitFor({ state: 'visible', timeout: 20000 });
-
-    const fieldNumbers = [15, 16, 17, 18, 19, 20, 21, 26];
-    const fields = {};
-    for (const fieldNumber of fieldNumbers) {
-        const field = draftWindow.locator(`input[id$="_${fieldNumber}"].decl_input_tb`).first();
-        await field.waitFor({ state: 'attached', timeout: 10000 });
-        const value = Number((await field.inputValue()).replace(',', '.'));
-        fields[fieldNumber] = Number.isFinite(value) ? value : 0;
-    }
-
-    const screenshotBuffer = await draftWindow.screenshot();
     await fs.promises.writeFile(
         path.join(SCREENSHOTS_DIR, 'declaration_draft.png'),
-        screenshotBuffer
+        result.screenshotBuffer
     );
 
     logger.info(`Черновик за ${expectedPeriod} открыт в режиме просмотра.`);
-    return {
-        exists: true,
-        status,
-        fields,
-        screenshotBuffer
-    };
+    return result;
 }
 
 function formatIsoDate(year, month, day) {
@@ -457,11 +428,7 @@ async function getPaymentHistory(page, options = {}) {
             }
         }
 
-        const rows = await page.locator('#rsGrid_grdPayerCard tr').evaluateAll((tableRows) => (
-            tableRows.map((row) => (
-                Array.from(row.querySelectorAll('td')).map((cell) => cell.innerText.trim())
-            ))
-        ));
+        const rows = await readPayerCardTable(page);
         const parsed = parsePayerCardRows(rows);
         allPayments.push(...parsed.payments);
         allCharges.push(...parsed.charges);

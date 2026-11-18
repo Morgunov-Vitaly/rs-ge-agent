@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/Morgunov-Vitaly/rs-ge-agent/security/advisories/new
+    about: Never disclose credentials, taxpayer data or financial records in a public issue.

@@ -215,8 +215,9 @@ Self-hosted не означает автоматически безопасны�
 - [x] добавить SECURITY.md и CONTRIBUTING.md;
 - [x] выбрать и добавить LICENSE (`AGPL-3.0-only`);
 - завершить разделение оставшихся domain logic, connectors и Telegram handlers;
-- зафиксировать portal fixtures без персональных данных;
-- добавить unit, contract и browser smoke tests.
+- [x] зафиксировать portal fixtures без персональных данных;
+- [x] добавить unit и browser contract tests;
+- добавить read-only smoke tests против реального портала в отдельном защищенном окружении.
 
 ### P1 — Надежный single-user MVP
 

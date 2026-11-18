@@ -7,4 +7,5 @@ session_state.json
 logs/
 screenshots/
 output/
+test-results/
 *.png
