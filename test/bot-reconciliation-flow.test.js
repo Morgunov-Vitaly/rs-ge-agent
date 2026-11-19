@@ -39,7 +39,12 @@ test('Telegram writes reconciliation data only after explicit DATA_WRITE confirm
         charges: [],
         balance: { debt: 0, overpayment: 0 }
     };
+    const refreshedPortalHistory = {
+        ...portalHistory,
+        payments: [portalHistory.payments[0]]
+    };
     let submittedCode;
+    let historyCalls = 0;
     let applyCalls = 0;
     let appliedPlan;
 
@@ -47,7 +52,10 @@ test('Telegram writes reconciliation data only after explicit DATA_WRITE confirm
         submittedCode = await onSmsRequired(Buffer.from('fake login screenshot'));
         return { browser: { close: async () => undefined }, page: {}, isLoggedIn: true };
     };
-    playwright.getPaymentHistory = async () => portalHistory;
+    playwright.getPaymentHistory = async () => {
+        historyCalls += 1;
+        return historyCalls === 1 ? portalHistory : refreshedPortalHistory;
+    };
     sheets.getAllRecords = async () => records;
     sheets.applyPaymentReconciliationPlan = async (plan) => {
         applyCalls += 1;
@@ -122,11 +130,32 @@ test('Telegram writes reconciliation data only after explicit DATA_WRITE confirm
 
         const callbackData = previewCall.payload.reply_markup.inline_keyboard[0][0].callback_data;
         await bot.handleUpdate(callbackUpdate(3, callbackData));
+        await waitFor(() => (
+            Boolean(sessionState.reconciliationConfirmation) &&
+            telegramCalls.filter(({ payload }) => (
+                payload?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data
+                    ?.startsWith('reconcile_confirm:')
+            )).length === 2
+        ));
+
+        assert.equal(applyCalls, 0);
+        assert.ok(telegramCalls.some(({ payload }) => (
+            String(payload?.text || '').includes('Проверьте новый preview')
+        )));
+        const refreshedPreviewCall = telegramCalls.filter(({ payload }) => (
+            payload?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data
+                ?.startsWith('reconcile_confirm:')
+        )).at(-1);
+        const refreshedCallbackData = (
+            refreshedPreviewCall.payload.reply_markup.inline_keyboard[0][0].callback_data
+        );
+        assert.notEqual(refreshedCallbackData, callbackData);
+        await bot.handleUpdate(callbackUpdate(4, refreshedCallbackData));
         await waitFor(() => !sessionState.fillInProgress);
 
         assert.equal(applyCalls, 1);
         assert.equal(appliedPlan.updates.length, 1);
-        assert.equal(appliedPlan.inserts.length, 1);
+        assert.equal(appliedPlan.inserts.length, 0);
         assert.ok(telegramCalls.some(({ payload }) => (
             String(payload?.text || '').includes('Сверка записана в Google Sheets')
         )));

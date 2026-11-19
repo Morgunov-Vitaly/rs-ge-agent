@@ -159,6 +159,7 @@ test('rejects a stale reconciliation preview before writing to Google Sheets', a
     });
     let writeCalls = 0;
 
+    let staleError;
     await assert.rejects(
         executeModuleAction(
             smallBusinessModule,
@@ -181,9 +182,15 @@ test('rejects a stale reconciliation preview before writing to Google Sheets', a
             },
             { confirmed: true, idempotencyKey: preview.idempotencyKey }
         ),
-        ({ code }) => code === 'PAYMENT_RECONCILIATION_STALE'
+        (error) => {
+            staleError = error;
+            return error.code === 'PAYMENT_RECONCILIATION_STALE';
+        }
     );
     assert.equal(writeCalls, 0);
+    assert.equal(staleError.code, 'PAYMENT_RECONCILIATION_STALE');
+    assert.ok(staleError.refreshedPreview);
+    assert.notEqual(staleError.refreshedPreview.fingerprint, preview.fingerprint);
 });
 
 test('rejects a preview when a reconciliation source cell changes', async () => {

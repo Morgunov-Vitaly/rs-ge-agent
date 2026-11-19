@@ -203,9 +203,10 @@ async function executePaymentReconciliationSync({
 
         if (preview.fingerprint !== previewFingerprint) {
             const error = new Error(
-                'Данные Google Sheets или RS.GE изменились после preview. Запустите /reconcile заново.'
+                'Данные Google Sheets или RS.GE изменились после preview.'
             );
             error.code = 'PAYMENT_RECONCILIATION_STALE';
+            error.refreshedPreview = preview;
             throw error;
         }
 

@@ -62,6 +62,7 @@ const sessionState = {
 const SMS_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 const DRAFT_CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000;
 const RECONCILIATION_CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_RECONCILIATION_REFRESHES = 2;
 
 function createFlowError(message, code) {
     const error = new Error(message);
@@ -531,26 +532,46 @@ async function runReconciliationFlow(ctx) {
         });
         await replyLongText(ctx, reconciliationResult.report);
 
-        const preview = buildPaymentReconciliationPreview({
+        let preview = buildPaymentReconciliationPreview({
             records: reconciliationResult.records,
             reconciliation: reconciliationResult.reconciliation
         });
-        await requestReconciliationConfirmation(ctx, preview);
-        await ctx.reply('⏳ Подтверждение получено. Повторно проверяю данные перед записью...');
+        let result;
+        for (let refreshCount = 0; ; refreshCount += 1) {
+            await requestReconciliationConfirmation(ctx, preview);
+            await ctx.reply('⏳ Подтверждение получено. Повторно проверяю данные перед записью...');
 
-        const result = await executeModuleAction(
-            smallBusinessModule,
-            'sync-payment-reconciliation',
-            {
-                recordsRepository,
-                rsGeClient,
-                previewFingerprint: preview.fingerprint
-            },
-            {
-                confirmed: true,
-                idempotencyKey: preview.idempotencyKey
+            try {
+                result = await executeModuleAction(
+                    smallBusinessModule,
+                    'sync-payment-reconciliation',
+                    {
+                        recordsRepository,
+                        rsGeClient,
+                        previewFingerprint: preview.fingerprint
+                    },
+                    {
+                        confirmed: true,
+                        idempotencyKey: preview.idempotencyKey
+                    }
+                );
+                break;
+            } catch (error) {
+                if (
+                    error.code !== 'PAYMENT_RECONCILIATION_STALE' ||
+                    !error.refreshedPreview ||
+                    refreshCount >= MAX_RECONCILIATION_REFRESHES
+                ) {
+                    throw error;
+                }
+
+                preview = error.refreshedPreview;
+                await ctx.reply(
+                    '⚠️ RS.GE или Google Sheets вернули обновлённые данные. ' +
+                    'Ничего не записано. Проверьте новый preview и подтвердите его повторно.'
+                );
             }
-        );
+        }
         await ctx.reply(
             '✅ Сверка записана в Google Sheets.\n' +
             `Дополнено существующих строк: ${result.writeResult.updatedRows}.\n` +
