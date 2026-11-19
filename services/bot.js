@@ -30,10 +30,15 @@ const {
     getDeclarationPreviewFingerprint,
     createDraftIdempotencyKey
 } = require('../workflows/declaration-draft');
+const {
+    buildDeclarationSubmissionPreview,
+    createSubmissionIdempotencyKey,
+    getSubmissionPreviewFingerprint
+} = require('../workflows/declaration-submit');
 const { executeModuleAction } = require('../core/action-contract');
 const smallBusinessModule = require('../modules/small-business/manifest');
 
-assertConfig(config, ['telegram']);
+assertConfig(config, ['telegram', 'submission']);
 const BOT_TOKEN = config.telegram.token;
 const ALLOWED_CHAT_ID = config.telegram.allowedChatId;
 const recordsRepository = createGoogleSheetsIncomeRepository();
@@ -55,12 +60,14 @@ const sessionState = {
     smsChatId: null,
     smsTimeout: null,
     draftConfirmation: null,
+    submissionConfirmation: null,
     reconciliationConfirmation: null,
     incomeWizard: {}
 };
 
 const SMS_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 const DRAFT_CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000;
+const SUBMISSION_CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000;
 const RECONCILIATION_CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_RECONCILIATION_REFRESHES = 2;
 
@@ -218,6 +225,90 @@ async function requestDraftConfirmation(ctx, preview) {
     return confirmationPromise;
 }
 
+function clearSubmissionConfirmation() {
+    if (sessionState.submissionConfirmation?.timeout) {
+        clearTimeout(sessionState.submissionConfirmation.timeout);
+    }
+    sessionState.submissionConfirmation = null;
+}
+
+function settleSubmissionConfirmation(chatId, token, error) {
+    const pending = sessionState.submissionConfirmation;
+    if (!pending || pending.chatId !== chatId || pending.token !== token) return false;
+
+    clearSubmissionConfirmation();
+    if (error) pending.reject(error);
+    else pending.resolve(true);
+    return true;
+}
+
+function cancelSubmissionConfirmation(chatId, error) {
+    const pending = sessionState.submissionConfirmation;
+    if (!pending || pending.chatId !== chatId) return false;
+    return settleSubmissionConfirmation(chatId, pending.token, error);
+}
+
+function formatSubmissionPreview(preview) {
+    return (
+        `⚠️ ФИНАЛЬНАЯ ОТПРАВКА за ${preview.period}\n\n` +
+        'Класс риска: IRREVERSIBLE\n' +
+        `Доход за месяц: ${preview.fields[20].toFixed(2)} GEL\n` +
+        `Доход с начала года: ${preview.fields[15].toFixed(2)} GEL\n` +
+        `Ставка: ${preview.fields[16].toFixed(0)}%\n` +
+        `Налог: ${preview.fields[26].toFixed(2)} GEL\n` +
+        `Текущий статус RS.GE: ${preview.sourceStatus}\n\n` +
+        'После подтверждения декларация будет отправлена на RS.GE. ' +
+        'Это действие нельзя отменить.'
+    );
+}
+
+async function requestSubmissionConfirmation(ctx, preview) {
+    if (sessionState.submissionConfirmation) {
+        throw createFlowError(
+            'Уже ожидается подтверждение финальной отправки.',
+            'SUBMISSION_CONFIRMATION_ALREADY_PENDING'
+        );
+    }
+
+    const token = crypto.randomUUID();
+    const confirmationPromise = new Promise((resolve, reject) => {
+        sessionState.submissionConfirmation = {
+            chatId: ctx.chat.id,
+            token,
+            resolve,
+            reject,
+            timeout: setTimeout(() => {
+                settleSubmissionConfirmation(
+                    ctx.chat.id,
+                    token,
+                    createFlowError(
+                        'Время подтверждения истекло. Запустите /submit заново.',
+                        'SUBMISSION_CONFIRMATION_TIMEOUT'
+                    )
+                );
+            }, SUBMISSION_CONFIRMATION_TIMEOUT_MS)
+        };
+    });
+
+    try {
+        await ctx.reply(
+            formatSubmissionPreview(preview),
+            Markup.inlineKeyboard([
+                [Markup.button.callback(
+                    `🔴 БЕЗВОЗВРАТНО отправить ${preview.period}`,
+                    `submit_confirm:${token}`
+                )],
+                [Markup.button.callback('⚪️ Отмена', `submit_cancel:${token}`)]
+            ])
+        );
+    } catch (error) {
+        clearSubmissionConfirmation();
+        throw error;
+    }
+
+    return confirmationPromise;
+}
+
 function clearReconciliationConfirmation() {
     if (sessionState.reconciliationConfirmation?.timeout) {
         clearTimeout(sessionState.reconciliationConfirmation.timeout);
@@ -346,6 +437,9 @@ async function runFillFlow(ctx) {
             const outcome = creation.created
                 ? '✅ Черновик создан и сохранен на RS.GE.'
                 : '✅ Такой же черновик уже существует; повторная запись не выполнялась.';
+            const submitHint = config.rsGe.enableSubmission
+                ? 'Декларация НЕ отправлена. После ручной проверки запустите /submit.'
+                : 'Декларация НЕ отправлена. Финальная отправка заблокирована флагом безопасности.';
             await ctx.replyWithPhoto(
                 { source: creation.draft.screenshotBuffer },
                 {
@@ -355,7 +449,7 @@ async function runFillFlow(ctx) {
                         `Графа 15: ${creation.draft.fields[15].toFixed(2)} GEL\n` +
                         `Графа 20: ${creation.draft.fields[20].toFixed(2)} GEL\n` +
                         `Графа 26: ${creation.draft.fields[26].toFixed(2)} GEL\n\n` +
-                        'Декларация НЕ отправлена. Для отправки нет автоматической команды.'
+                        submitHint
                 }
             );
             return;
@@ -371,7 +465,11 @@ async function runFillFlow(ctx) {
             ? `Оплата по таблице: ${summary.paymentDate}`
             : 'Оплата по таблице не отмечена';
 
-        const declarationLabel = draft.status === 'Sent' ? 'Декларация' : 'Черновик';
+        const declarationSent = draftComparison.rsStatusIsSent;
+        const declarationLabel = declarationSent ? 'Декларация' : 'Черновик';
+        const finalState = declarationSent
+            ? 'Декларация уже отправлена; данные RS.GE не изменялись.'
+            : 'Форма открыта только для просмотра и не отправлена.';
         const caption =
             `${declarationLabel} за ${String(reportMonth).padStart(2, '0')}.${reportYear}\n` +
             `Статус RS.GE: ${draft.status || 'сохранен'}\n` +
@@ -382,7 +480,7 @@ async function runFillFlow(ctx) {
             `Графа 26: ${draft.fields[26].toFixed(2)} GEL\n` +
             `${comparison}\n` +
             `${statusComparison ? `${statusComparison}\n` : ''}` +
-            `\nФорма открыта только для просмотра и не отправлена.`;
+            `\n${finalState}`;
 
         await ctx.replyWithPhoto(
             { source: draft.screenshotBuffer },
@@ -432,6 +530,121 @@ async function replyLongText(ctx, text) {
     }
 
     if (chunk) await ctx.reply(chunk);
+}
+
+async function runSubmissionFlow(ctx) {
+    let loginResult;
+
+    try {
+        if (!config.rsGe.enableSubmission) {
+            throw createFlowError(
+                'Финальная отправка пока заблокирована флагом безопасности.',
+                'SUBMISSION_DISABLED'
+            );
+        }
+
+        const { year, month } = getPreviousReportPeriod();
+        const periodInfo = rules.checkSubmissionPeriod(year, month, new Date());
+        if (!periodInfo.canSubmit) throw new Error(periodInfo.message);
+
+        loginResult = await playwright.loginToRsGe(
+            (screenshotBuffer) => requestSmsCode(ctx, screenshotBuffer)
+        );
+        await ctx.reply('🎉 Вход выполнен. Проверяю черновик перед финальной отправкой...');
+
+        const rsGeClient = createRsGeBrowserClient(loginResult.page);
+        const review = await executeDeclarationReview({
+            recordsRepository,
+            rsGeClient,
+            year,
+            month
+        });
+        if (!review.exists) {
+            throw createFlowError(
+                'Сначала создайте и проверьте черновик через /fill.',
+                'DECLARATION_DRAFT_NOT_FOUND'
+            );
+        }
+        if (review.comparison.rsStatusIsSent) {
+            await ctx.reply(
+                `✅ Декларация за ${String(month).padStart(2, '0')}.${year} уже имеет статус Sent. ` +
+                'Повторная отправка не выполнялась.'
+            );
+            return;
+        }
+
+        const preview = buildDeclarationSubmissionPreview({
+            year,
+            month,
+            summary: review.summary,
+            yearSummary: review.yearSummary,
+            draft: review.draft
+        });
+        const previewFingerprint = getSubmissionPreviewFingerprint(preview);
+        const idempotencyKey = createSubmissionIdempotencyKey(preview);
+
+        await requestSubmissionConfirmation(ctx, preview);
+        await ctx.reply(
+            '⏳ Подтверждение получено. Повторно сверяю суммы и статус перед отправкой...'
+        );
+
+        const result = await executeModuleAction(
+            smallBusinessModule,
+            'submit-declaration',
+            {
+                recordsRepository,
+                rsGeClient,
+                year,
+                month,
+                previewFingerprint
+            },
+            { confirmed: true, idempotencyKey }
+        );
+
+        if (result.alreadySent) {
+            await ctx.reply('✅ RS.GE уже показывает Sent. Повторный клик не выполнялся.');
+            return;
+        }
+
+        await ctx.replyWithPhoto(
+            { source: result.declaration.screenshotBuffer },
+            {
+                caption:
+                    `✅ Декларация за ${preview.period} отправлена.\n` +
+                    `Статус RS.GE: ${result.declaration.status}\n` +
+                    `Доход: ${preview.fields[20].toFixed(2)} GEL\n` +
+                    `Налог: ${preview.fields[26].toFixed(2)} GEL\n\n` +
+                    'Screenshot, PDF и SHA-256 сохранены в evidence-хранилище. ' +
+                    'Google Sheets на этом шаге не изменялась.'
+            }
+        );
+        await ctx.replyWithDocument({
+            source: result.declaration.pdfBuffer,
+            filename: `rs-ge-declaration-${year}-${String(month).padStart(2, '0')}.pdf`
+        });
+    } catch (err) {
+        logger.error('Ошибка при запуске /submit:', err);
+        if (err.code !== 'USER_CANCELLED') {
+            const prefix = err.code === 'RSGE_SUBMISSION_OUTCOME_UNKNOWN' ||
+                String(err.code || '').startsWith('SUBMISSION_SUCCEEDED_')
+                ? '⚠️ Не повторяйте отправку. '
+                : '❌ ';
+            await ctx.reply(`${prefix}${err.message}`);
+        }
+    } finally {
+        if (sessionState.smsChatId === ctx.chat.id) clearSmsWaitState();
+        if (sessionState.submissionConfirmation?.chatId === ctx.chat.id) {
+            clearSubmissionConfirmation();
+        }
+        if (loginResult?.browser) {
+            await loginResult.browser.close().catch((err) => {
+                logger.warn('Не удалось закрыть браузер:', err.message);
+            });
+        }
+        sessionState.fillInProgress = false;
+        sessionState.fillChatId = null;
+        sessionState.activeOperation = null;
+    }
 }
 
 async function runPaymentsFlow(ctx) {
@@ -626,12 +839,16 @@ bot.catch(async (err, ctx) => {
 
 // Главная клавиатура
 function getMainMenu() {
-    return Markup.keyboard([
+    const rows = [
         ['➕ Добавить доход', '📊 Статус за месяц'],
         ['📝 Подготовить декларацию', '💳 Оплатить налог'],
         ['🔍 Проверить оплаты'],
         ['❓ Помощь']
-    ]).resize();
+    ];
+    if (config.rsGe.enableSubmission) {
+        rows.splice(2, 0, ['📨 Отправить декларацию']);
+    }
+    return Markup.keyboard(rows).resize();
 }
 
 // Клавиатура отмены мастера
@@ -649,11 +866,15 @@ function getCurrencyKeyboard() {
 
 // /start
 bot.start(async (ctx) => {
+    const submissionMenuText = config.rsGe.enableSubmission
+        ? `• 📨 *Отправить декларацию* — отдельно подтверждаемая финальная отправка\n`
+        : '';
     const welcome = `👋 Привет! Я твой налоговый агент по Грузии (ИП, малый бизнес 1%).\n\n` +
         `Выбери нужное действие в меню снизу:\n\n` +
         `• ➕ *Добавить доход* — пошаговый ввод нового поступления (сумма, валюта, дата)\n` +
         `• 📊 *Статус за месяц* — сводка из Google Таблицы, налог 1% и сроки\n` +
         `• 📝 *Подготовить декларацию* — preview и подтверждаемое сохранение черновика на rs.ge\n` +
+        submissionMenuText +
         `• 💳 *Оплатить налог* — ссылка и реквизиты Казначейства\n` +
         `• 🔍 *Проверить оплаты* — единая проверка декларации, платежей, задолженности и истории RS.GE\n\n` +
         `💡 Также можно быстро отправить строку вида: \`15.10 2500 USD\``;
@@ -685,6 +906,10 @@ bot.hears(['❌ Отмена', '/cancel'], async (ctx) => {
         ctx.chat.id,
         createFlowError('Создание черновика отменено пользователем.', 'USER_CANCELLED')
     );
+    cancelSubmissionConfirmation(
+        ctx.chat.id,
+        createFlowError('Финальная отправка отменена пользователем.', 'USER_CANCELLED')
+    );
     cancelReconciliationConfirmation(
         ctx.chat.id,
         createFlowError('Синхронизация сверки отменена пользователем.', 'USER_CANCELLED')
@@ -694,16 +919,21 @@ bot.hears(['❌ Отмена', '/cancel'], async (ctx) => {
 
 // /help или кнопка "Помощь"
 bot.hears(['❓ Помощь', '/help'], async (ctx) => {
+    const submissionHelp = config.rsGe.enableSubmission
+        ? `\n\n4. *📨 Отправить декларацию (/submit)*\n` +
+            `Повторно сверяет черновик и после отдельного IRREVERSIBLE-подтверждения отправляет его на RS.GE.`
+        : '';
     const helpText = `📖 *Как пользоваться ботом:*\n\n` +
         `1. *➕ Добавить доход (/add)*\n` +
         `Пошаговый мастер запросит сумму, валюту (USD/EUR/GEL), дату поступления и назначение. Бот сам обратится к Нацбанку Грузии (NBG), пересчитает сумму в лари по курсу на этот день и добавит запись в твою Google Таблицу.\n\n` +
         `2. *📊 Статус за месяц (/status)*\n` +
         `Показывает доходы из таблицы, налог 1% и подсказывает, когда открыто окно подачи.\n\n` +
         `3. *📝 Подготовить декларацию (/fill)*\n` +
-        `Бот входит на rs.ge, показывает preview и только после отдельного подтверждения сохраняет черновик. Финальная отправка не выполняется.\n\n` +
-        `4. *💳 Оплатить налог (/pay)*\n` +
+        `Бот входит на rs.ge, показывает preview и только после отдельного подтверждения сохраняет черновик.` +
+        submissionHelp + `\n\n` +
+        `${config.rsGe.enableSubmission ? '5' : '4'}. *💳 Оплатить налог (/pay)*\n` +
         `Ссылка на официальный шлюз rs.ge и реквизиты Казначейства (101001000).\n\n` +
-        `5. *🔍 Проверить оплаты (/payments)*\n` +
+        `${config.rsGe.enableSubmission ? '6' : '5'}. *🔍 Проверить оплаты (/payments)*\n` +
         `Одним входом проверяет декларацию за последний период, фактическую оплату, задолженность и всю историю платежей. ` +
         `Если появились новые расхождения, бот предложит записать их в таблицу после отдельного подтверждения.`;
 
@@ -802,6 +1032,31 @@ bot.hears(['📝 Подготовить декларацию', '📝 Подат�
     });
 });
 
+bot.hears(['📨 Отправить декларацию', '/submit'], async (ctx) => {
+    if (!config.rsGe.enableSubmission) {
+        return ctx.reply(
+            '🔒 Финальная отправка пока заблокирована. ' +
+            'Функция будет включена только для согласованного live smoke.'
+        );
+    }
+    if (sessionState.fillInProgress) {
+        return ctx.reply('⏳ Операция с RS.GE уже запущена. Завершите ее или нажмите /cancel.');
+    }
+
+    sessionState.fillInProgress = true;
+    sessionState.fillChatId = ctx.chat.id;
+    sessionState.activeOperation = 'submit';
+    await ctx.reply(
+        '🔍 Готовлю независимый preview для финальной отправки. ' +
+        'До отдельного подтверждения ничего на RS.GE не изменится.'
+    );
+    setImmediate(() => {
+        runSubmissionFlow(ctx).catch((err) => {
+            logger.error('Фоновый процесс /submit завершился с ошибкой:', err);
+        });
+    });
+});
+
 bot.action(/^draft_confirm:(.+)$/, async (ctx) => {
     const token = ctx.match[1];
     const accepted = settleDraftConfirmation(ctx.chat.id, token);
@@ -822,6 +1077,29 @@ bot.action(/^draft_cancel:(.+)$/, async (ctx) => {
     if (cancelled) {
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => undefined);
         await ctx.reply('Создание черновика отменено. Данные на RS.GE не изменены.', getMainMenu());
+    }
+});
+
+bot.action(/^submit_confirm:(.+)$/, async (ctx) => {
+    const token = ctx.match[1];
+    const accepted = settleSubmissionConfirmation(ctx.chat.id, token);
+    await ctx.answerCbQuery(accepted ? 'Финальное подтверждение принято' : 'Это подтверждение уже недействительно');
+    if (accepted) {
+        await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => undefined);
+    }
+});
+
+bot.action(/^submit_cancel:(.+)$/, async (ctx) => {
+    const token = ctx.match[1];
+    const cancelled = settleSubmissionConfirmation(
+        ctx.chat.id,
+        token,
+        createFlowError('Финальная отправка отменена пользователем.', 'USER_CANCELLED')
+    );
+    await ctx.answerCbQuery(cancelled ? 'Отправка отменена' : 'Это подтверждение уже недействительно');
+    if (cancelled) {
+        await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => undefined);
+        await ctx.reply('Отправка отменена. Данные RS.GE не изменены.', getMainMenu());
     }
 });
 

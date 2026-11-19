@@ -102,7 +102,7 @@ function declarationFieldsMatch(actualFields, expectedFields, tolerance = 0.02) 
 }
 
 function isSentStatus(status) {
-    return /sent|подан|გაგზავნილ/i.test(String(status || ''));
+    return /sent|подан|გაგზავნილ|გადაგზავნილ/i.test(String(status || ''));
 }
 
 async function executeDeclarationDraftCreation(input, execution = {}) {
@@ -223,5 +223,6 @@ module.exports = {
     getDeclarationPreviewFingerprint,
     createDraftIdempotencyKey,
     declarationFieldsMatch,
+    isSentStatus,
     executeDeclarationDraftCreation
 };

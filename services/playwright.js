@@ -15,6 +15,7 @@ const {
     readPayerCardTable
 } = require('../connectors/rsge/page-readers');
 const { writeSmallBusinessDraftPage } = require('../connectors/rsge/page-writers');
+const { submitSmallBusinessDeclarationPage } = require('../connectors/rsge/page-submitters');
 
 const SESSION_STORAGE_PATH = config.rsGe.sessionStoragePath;
 const SCREENSHOTS_DIR = config.rsGe.screenshotsDir;
@@ -317,6 +318,17 @@ async function createSmallBusinessDraft(page, preview) {
     return result;
 }
 
+/**
+ * Executes the separately confirmed irreversible submit operation.
+ * The final-submit selectors live only in page-submitters.js.
+ */
+async function submitSmallBusinessDeclaration(page, preview, options = {}) {
+    const result = await submitSmallBusinessDeclarationPage(page, preview, options);
+    await saveRuntimeScreenshot('declaration_submitted.png', result.screenshotBuffer);
+    logger.info(`Декларация за ${preview.period} подтверждена в статусе Sent.`);
+    return result;
+}
+
 function formatIsoDate(year, month, day) {
     const parsed = new Date(Date.UTC(year, month - 1, day));
     if (
@@ -577,6 +589,7 @@ module.exports = {
     loginToRsGe,
     openExistingSmallBusinessDraft,
     createSmallBusinessDraft,
+    submitSmallBusinessDeclaration,
     getPaymentHistory,
     parseRsGeDate,
     parsePaymentOrderDate,

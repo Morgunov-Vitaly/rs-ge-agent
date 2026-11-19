@@ -161,6 +161,8 @@ async function writeSmallBusinessDraftPage(page, preview, options = {}) {
 
 module.exports = {
     VERIFIED_FIELDS,
+    fieldsMatch,
     parsePortalNumber,
+    readEditorFields,
     writeSmallBusinessDraftPage
 };

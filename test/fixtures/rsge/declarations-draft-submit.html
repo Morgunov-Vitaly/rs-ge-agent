@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ka">
+<body>
+    <div id="control_0_m"><input class="d_value" value="10.2026"></div>
+    <table id="control_0_g3g">
+        <tbody>
+            <tr id="declaration-row">
+                <td id="declaration-status">შენახული</td>
+                <td>20.01</td>
+                <td>0</td>
+                <td>fixture-declaration-number</td>
+                <td>fixture-registration</td>
+                <td></td>
+                <td>fixture-user</td>
+                <td>19.11.2026 12:00</td>
+                <td>
+                    <img
+                        src="assets/view.png"
+                        alt="view declaration"
+                        onclick="document.getElementById('draft-window').style.display='block'"
+                    >
+                </td>
+            </tr>
+            <tr style="display: none">
+                <td>{$T.STATUS_TXT}</td>
+                <td>{$T.AMOUNT}</td>
+                <td><img src="assets/view.png" alt="template view"></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <section id="draft-window" class="window_panel" style="display: none">
+        <input id="fixture_15" class="decl_input_tb" value="12000.50">
+        <input id="fixture_16" class="decl_input_tb" value="1.00">
+        <input id="fixture_17" class="decl_input_tb" value="2000.50">
+        <input id="fixture_18" class="decl_input_tb" value="0">
+        <input id="fixture_19" class="decl_input_tb" value="0">
+        <input id="fixture_20" class="decl_input_tb" value="2000.50">
+        <input id="fixture_21" class="decl_input_tb" value="0">
+        <input id="fixture_26" class="decl_input_tb" value="20.01">
+        <button type="button" data-action="submit-declaration">გაგზავნა</button>
+    </section>
+
+    <section id="submit-confirmation" class="window_panel" role="dialog" style="display: none">
+        <p>ნამდვილად გსურთ დეკლარაციის გაგზავნა?</p>
+        <button type="button" data-action="confirm-submit">დიახ</button>
+        <button type="button" data-action="cancel-submit">არა</button>
+    </section>
+
+    <script>
+        window.__submitted = false;
+        window.__submitClicks = 0;
+        const editor = document.getElementById('draft-window');
+        const confirmation = document.getElementById('submit-confirmation');
+        document.querySelector('[data-action="submit-declaration"]').addEventListener('click', () => {
+            window.__submitClicks += 1;
+            confirmation.style.display = 'block';
+        });
+        document.querySelector('[data-action="confirm-submit"]').addEventListener('click', () => {
+            window.__submitted = true;
+            document.getElementById('declaration-status').textContent = 'გადაგზავნილი';
+            document.querySelector('#declaration-row td:nth-child(6)').textContent = '19.11.2026 12:05';
+            editor.style.display = 'none';
+            confirmation.style.display = 'none';
+        });
+    </script>
+</body>
+</html>

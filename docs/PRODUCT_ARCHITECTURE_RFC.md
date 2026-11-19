@@ -79,7 +79,7 @@ Open-source экосистема пока фрагментирована: сущ
 | Сверка черновика с таблицей | Работает | Графы 15, 20 и 26 |
 | История и сверка оплат | Работает | Read-only, показывает расхождения |
 | Создание новой декларации | Реализовано | Preview, подтверждение, `DRAFT_WRITE`, idempotency и повторная проверка; нужен первый live smoke после изменений портала |
-| Финальная отправка декларации | Не реализовано | Нужен HITL и proof of submission |
+| Финальная отправка декларации | Реализована, заблокирована по умолчанию | `IRREVERSIBLE`, HITL, idempotency, `Sent`, screenshot/PDF/SHA-256; ожидает live smoke |
 | Импорт банковских выписок | Не реализовано | В репозитории нет `statement.js` |
 | Ротация логов и временных скриншотов | Работает | TTL, квоты, startup/scheduled cleanup, dry-run |
 | Self-hosted Web UI | Не реализовано | Запланирован как альтернатива Telegram в P1 |
@@ -259,12 +259,13 @@ Retention должен быть настраиваемым для self-hosted у
 - [x] типизированный и оформленный журнал Google Sheets с динамической сводкой;
 - полный read-only health/status dashboard для нескольких периодов и сервисов;
 - [x] подготовка и сохранение нового черновика с preview, подтверждением и `DRAFT_WRITE`;
-- подтверждаемая финальная отправка как отдельная операция `IRREVERSIBLE`;
-- PDF-подтверждение и audit trail;
+- [x] подтверждаемая финальная отправка как отдельная операция `IRREVERSIBLE` (заблокирована feature flag до live smoke);
+- [x] PDF/screenshot-подтверждение, SHA-256 и audit trail;
 - scheduler напоминаний;
 - [x] автоматическая ротация операционных логов, квота диска и настраиваемый retention;
 - [x] TTL-очистка временных скриншотов с dry-run и audit event;
-- шифрованное хранение evidence artifacts с checksum и отдельным retention;
+- [x] шифрованное AES-256-GCM хранение evidence artifacts с SHA-256;
+- отдельный настраиваемый retention для evidence artifacts;
 - локальная SQLite вместо обязательной Google Sheets;
 - экспорт/импорт Google Sheets как адаптер;
 - минимальный self-hosted Web UI как альтернатива Telegram: status dashboard, история, preview и подтверждение действий.

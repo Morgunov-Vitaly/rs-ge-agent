@@ -9,6 +9,7 @@ const {
     readPayerCardTable
 } = require('../connectors/rsge/page-readers');
 const { writeSmallBusinessDraftPage } = require('../connectors/rsge/page-writers');
+const { submitSmallBusinessDeclarationPage } = require('../connectors/rsge/page-submitters');
 const {
     ACCOUNTING_URL,
     acknowledgePayerCardNotice,
@@ -105,6 +106,39 @@ test('recognizes the current Georgian sent status used by RS.GE', async () => {
             submittedAt: '17.11.2026 21:16',
             createdAt: '17.11.2026 21:10'
         });
+    });
+});
+
+test('submits an unchanged draft through the explicit confirmation and proves Sent', async () => {
+    await withFixture('declarations-draft-submit.html', async (page) => {
+        const draft = await readSmallBusinessDraftPage(page, '10.2026');
+        const preview = {
+            period: '10.2026',
+            fields: { ...draft.fields }
+        };
+        const result = await submitSmallBusinessDeclarationPage(page, preview);
+
+        assert.equal(await page.evaluate(() => window.__submitted), true);
+        assert.equal(await page.evaluate(() => window.__submitClicks), 1);
+        assert.equal(result.status, 'Sent');
+        assert.equal(result.fields[20], 2000.5);
+        assert.ok(Buffer.isBuffer(result.screenshotBuffer));
+        assert.ok(Buffer.isBuffer(result.pdfBuffer));
+    });
+});
+
+test('blocks submit when portal values differ from the confirmed preview', async () => {
+    await withFixture('declarations-draft-submit.html', async (page) => {
+        const draft = await readSmallBusinessDraftPage(page, '10.2026');
+        await assert.rejects(
+            submitSmallBusinessDeclarationPage(page, {
+                period: '10.2026',
+                fields: { ...draft.fields, 20: 9999 }
+            }),
+            ({ code }) => code === 'RSGE_SUBMISSION_VALUES_MISMATCH'
+        );
+        assert.equal(await page.evaluate(() => window.__submitClicks), 0);
+        assert.equal(await page.evaluate(() => window.__submitted), false);
     });
 });
 

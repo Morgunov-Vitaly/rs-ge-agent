@@ -34,8 +34,21 @@ test('configuration is structured and validated by scope', () => {
     assert.match(config.rsGe.screenshotsDir, /screenshots[\\/]tmp$/);
     assert.equal(config.runtime.retention.logMaxSizeBytes, 10 * 1024 * 1024);
     assert.equal(config.runtime.retention.screenshotTtlHours, 24);
+    assert.equal(config.rsGe.enableSubmission, false);
     assert.doesNotThrow(() => assertConfig(config, ['telegram', 'google']));
+    assert.doesNotThrow(() => assertConfig(config, ['submission']));
     assert.throws(() => assertConfig(config, ['rsge']), /RS_USERNAME, RS_PASSWORD/);
+
+    const unsafeSubmission = loadConfig({ RSGE_ENABLE_SUBMISSION: 'true' });
+    assert.throws(
+        () => assertConfig(unsafeSubmission, ['submission']),
+        /RSGE_EVIDENCE_KEY/
+    );
+    const safeSubmission = loadConfig({
+        RSGE_ENABLE_SUBMISSION: 'true',
+        RSGE_EVIDENCE_KEY: Buffer.alloc(32, 1).toString('base64')
+    });
+    assert.doesNotThrow(() => assertConfig(safeSubmission, ['submission']));
 });
 
 test('module contract rejects unsafe or incomplete actions', () => {
@@ -53,6 +66,7 @@ test('module contract rejects unsafe or incomplete actions', () => {
         [
             ACTION_RISKS.READ_ONLY,
             ACTION_RISKS.DRAFT_WRITE,
+            ACTION_RISKS.IRREVERSIBLE,
             ACTION_RISKS.READ_ONLY,
             ACTION_RISKS.READ_ONLY,
             ACTION_RISKS.DATA_WRITE

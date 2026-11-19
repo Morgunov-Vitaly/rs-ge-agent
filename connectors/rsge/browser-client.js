@@ -10,6 +10,9 @@ function createRsGeBrowserClient(page) {
         ),
         createSmallBusinessDraft: (preview, options) => (
             playwright.createSmallBusinessDraft(page, preview, options)
+        ),
+        submitSmallBusinessDeclaration: (preview, options) => (
+            playwright.submitSmallBusinessDeclaration(page, preview, options)
         )
     });
 }

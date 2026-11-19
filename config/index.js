@@ -12,6 +12,11 @@ function parsePositiveNumber(value, fallback) {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function parseBoolean(value, fallback = false) {
+    if (value === undefined || value === null || value === '') return fallback;
+    return /^(?:1|true|yes|on)$/i.test(String(value).trim());
+}
+
 function megabytes(value, fallback) {
     return Math.round(parsePositiveNumber(value, fallback) * 1024 * 1024);
 }
@@ -32,7 +37,9 @@ function loadConfig(env = process.env) {
             screenshotsRootDir,
             screenshotsDir: path.resolve(env.RS_SCREENSHOTS_TMP_DIR || path.join(screenshotsRootDir, 'tmp')),
             evidenceDir: path.resolve(env.RS_EVIDENCE_DIR || path.join(screenshotsRootDir, 'evidence')),
-            chromiumExecutablePath: env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || ''
+            chromiumExecutablePath: env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '',
+            enableSubmission: parseBoolean(env.RSGE_ENABLE_SUBMISSION, false),
+            evidenceEncryptionKey: env.RSGE_EVIDENCE_KEY || ''
         }),
         google: Object.freeze({
             spreadsheetId: env.GOOGLE_SPREADSHEET_ID || '',
@@ -69,6 +76,13 @@ function assertConfig(config, scopes) {
         if (!config.google.spreadsheetId) missing.push('GOOGLE_SPREADSHEET_ID');
         if (!config.google.credentialsPath) missing.push('GOOGLE_CREDENTIALS_PATH');
     }
+    if (
+        requested.has('submission') &&
+        config.rsGe.enableSubmission &&
+        !config.rsGe.evidenceEncryptionKey
+    ) {
+        missing.push('RSGE_EVIDENCE_KEY');
+    }
 
     if (missing.length) {
         throw new Error(`Не заданы обязательные параметры конфигурации: ${missing.join(', ')}`);
@@ -82,5 +96,6 @@ const config = loadConfig();
 module.exports = {
     config,
     loadConfig,
-    assertConfig
+    assertConfig,
+    parseBoolean
 };
