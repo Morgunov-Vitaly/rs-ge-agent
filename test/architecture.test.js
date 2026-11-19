@@ -54,7 +54,8 @@ test('module contract rejects unsafe or incomplete actions', () => {
             ACTION_RISKS.READ_ONLY,
             ACTION_RISKS.DRAFT_WRITE,
             ACTION_RISKS.READ_ONLY,
-            ACTION_RISKS.READ_ONLY
+            ACTION_RISKS.READ_ONLY,
+            ACTION_RISKS.DATA_WRITE
         ]
     );
 });

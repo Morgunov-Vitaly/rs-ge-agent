@@ -19,6 +19,10 @@ const { config, assertConfig } = require('../config');
 const { createGoogleSheetsIncomeRepository } = require('../connectors/google-sheets/income-repository');
 const { createRsGeBrowserClient } = require('../connectors/rsge/browser-client');
 const { executePaymentReconciliation } = require('../workflows/payment-reconciliation');
+const {
+    buildPaymentReconciliationPreview,
+    formatPaymentReconciliationPreview
+} = require('../workflows/payment-reconciliation-sync');
 const { executeDeclarationReview } = require('../workflows/declaration-review');
 const { executePeriodCheck } = require('../workflows/period-check');
 const {
@@ -51,11 +55,13 @@ const sessionState = {
     smsChatId: null,
     smsTimeout: null,
     draftConfirmation: null,
+    reconciliationConfirmation: null,
     incomeWizard: {}
 };
 
 const SMS_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 const DRAFT_CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000;
+const RECONCILIATION_CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000;
 
 function createFlowError(message, code) {
     const error = new Error(message);
@@ -205,6 +211,77 @@ async function requestDraftConfirmation(ctx, preview) {
         );
     } catch (error) {
         clearDraftConfirmation();
+        throw error;
+    }
+
+    return confirmationPromise;
+}
+
+function clearReconciliationConfirmation() {
+    if (sessionState.reconciliationConfirmation?.timeout) {
+        clearTimeout(sessionState.reconciliationConfirmation.timeout);
+    }
+    sessionState.reconciliationConfirmation = null;
+}
+
+function settleReconciliationConfirmation(chatId, token, error) {
+    const pending = sessionState.reconciliationConfirmation;
+    if (!pending || pending.chatId !== chatId || pending.token !== token) return false;
+
+    clearReconciliationConfirmation();
+    if (error) pending.reject(error);
+    else pending.resolve(true);
+    return true;
+}
+
+function cancelReconciliationConfirmation(chatId, error) {
+    const pending = sessionState.reconciliationConfirmation;
+    if (!pending || pending.chatId !== chatId) return false;
+    return settleReconciliationConfirmation(chatId, pending.token, error);
+}
+
+async function requestReconciliationConfirmation(ctx, preview) {
+    if (sessionState.reconciliationConfirmation) {
+        throw createFlowError(
+            'Уже ожидается подтверждение другой синхронизации.',
+            'RECONCILIATION_CONFIRMATION_ALREADY_PENDING'
+        );
+    }
+
+    const token = crypto.randomUUID();
+    const confirmationPromise = new Promise((resolve, reject) => {
+        sessionState.reconciliationConfirmation = {
+            chatId: ctx.chat.id,
+            token,
+            resolve,
+            reject,
+            timeout: setTimeout(() => {
+                settleReconciliationConfirmation(
+                    ctx.chat.id,
+                    token,
+                    createFlowError(
+                        'Время подтверждения истекло. Запустите /reconcile заново.',
+                        'RECONCILIATION_CONFIRMATION_TIMEOUT'
+                    )
+                );
+            }, RECONCILIATION_CONFIRMATION_TIMEOUT_MS)
+        };
+    });
+
+    try {
+        await ctx.reply(
+            formatPaymentReconciliationPreview(preview),
+            Markup.inlineKeyboard([
+                [Markup.button.callback(
+                    `🟢 Применить: ${preview.summary.rowsToUpdate} обновить, ` +
+                    `${preview.summary.portalRowsToInsert} добавить`,
+                    `reconcile_confirm:${token}`
+                )],
+                [Markup.button.callback('🔴 Отмена', `reconcile_cancel:${token}`)]
+            ])
+        );
+    } catch (error) {
+        clearReconciliationConfirmation();
         throw error;
     }
 
@@ -438,6 +515,71 @@ async function runPeriodCheckFlow(ctx) {
     }
 }
 
+async function runReconciliationFlow(ctx) {
+    let loginResult;
+
+    try {
+        loginResult = await playwright.loginToRsGe(
+            (screenshotBuffer) => requestSmsCode(ctx, screenshotBuffer)
+        );
+        await ctx.reply('🎉 Вход выполнен. Готовлю preview сверки RS.GE и Google Sheets...');
+
+        const rsGeClient = createRsGeBrowserClient(loginResult.page);
+        const reconciliationResult = await executePaymentReconciliation({
+            recordsRepository,
+            rsGeClient
+        });
+        await replyLongText(ctx, reconciliationResult.report);
+
+        const preview = buildPaymentReconciliationPreview({
+            records: reconciliationResult.records,
+            reconciliation: reconciliationResult.reconciliation
+        });
+        await requestReconciliationConfirmation(ctx, preview);
+        await ctx.reply('⏳ Подтверждение получено. Повторно проверяю данные перед записью...');
+
+        const result = await executeModuleAction(
+            smallBusinessModule,
+            'sync-payment-reconciliation',
+            {
+                recordsRepository,
+                rsGeClient,
+                previewFingerprint: preview.fingerprint
+            },
+            {
+                confirmed: true,
+                idempotencyKey: preview.idempotencyKey
+            }
+        );
+        await ctx.reply(
+            '✅ Сверка записана в Google Sheets.\n' +
+            `Дополнено существующих строк: ${result.writeResult.updatedRows}.\n` +
+            `Добавлено несопоставленных платежей RS.GE: ${result.writeResult.insertedRows}.\n` +
+            'Исходные колонки A–I не изменялись.'
+        );
+    } catch (err) {
+        logger.error('Ошибка при запуске /reconcile:', err);
+        if (err.code !== 'USER_CANCELLED') {
+            await ctx.reply(`❌ Ошибка синхронизации сверки: ${err.message}`);
+        }
+    } finally {
+        if (sessionState.smsChatId === ctx.chat.id) {
+            clearSmsWaitState();
+        }
+        if (sessionState.reconciliationConfirmation?.chatId === ctx.chat.id) {
+            clearReconciliationConfirmation();
+        }
+        if (loginResult?.browser) {
+            await loginResult.browser.close().catch((err) => {
+                logger.warn('Не удалось закрыть браузер:', err.message);
+            });
+        }
+        sessionState.fillInProgress = false;
+        sessionState.fillChatId = null;
+        sessionState.activeOperation = null;
+    }
+}
+
 // Middleware: доступ только для владельца бота
 bot.use(async (ctx, next) => {
     if (ALLOWED_CHAT_ID && ctx.chat && ctx.chat.id !== ALLOWED_CHAT_ID) {
@@ -461,6 +603,7 @@ function getMainMenu() {
         ['➕ Добавить доход', '📊 Статус за месяц'],
         ['📝 Подготовить декларацию', '💳 Оплатить налог'],
         ['✅ Проверить период', '🔍 Проверить оплаты'],
+        ['🧩 Записать сверку'],
         ['❓ Помощь']
     ]).resize();
 }
@@ -488,6 +631,7 @@ bot.start(async (ctx) => {
         `• 💳 *Оплатить налог* — ссылка и реквизиты Казначейства\n` +
         `• ✅ *Проверить период* — единая read-only проверка декларации, оплаты и задолженности\n` +
         `• 🔍 *Проверить оплаты* — сверка дат и сумм с личной карточкой RS.GE\n\n` +
+        `• 🧩 *Записать сверку* — preview и подтверждаемая запись данных RS.GE в таблицу\n\n` +
         `💡 Также можно быстро отправить строку вида: \`15.10 2500 USD\``;
 
     await ctx.replyWithMarkdown(welcome, getMainMenu());
@@ -517,6 +661,10 @@ bot.hears(['❌ Отмена', '/cancel'], async (ctx) => {
         ctx.chat.id,
         createFlowError('Создание черновика отменено пользователем.', 'USER_CANCELLED')
     );
+    cancelReconciliationConfirmation(
+        ctx.chat.id,
+        createFlowError('Синхронизация сверки отменена пользователем.', 'USER_CANCELLED')
+    );
     await ctx.reply('Действие отменено.', getMainMenu());
 });
 
@@ -534,7 +682,9 @@ bot.hears(['❓ Помощь', '/help'], async (ctx) => {
         `5. *✅ Проверить период (/check)*\n` +
         `Одним входом проверяет отправку декларации, суммы, фактическую оплату и задолженность. Это только чтение: данные не изменяются.\n\n` +
         `6. *🔍 Проверить оплаты (/payments)*\n` +
-        `Читает личную карточку на RS.GE и сверяет даты и фактические суммы платежей с Google Таблицей. Таблица автоматически не изменяется.`;
+        `Читает личную карточку на RS.GE и сверяет даты и фактические суммы платежей с Google Таблицей. Таблица автоматически не изменяется.\n\n` +
+        `7. *🧩 Записать сверку (/reconcile)*\n` +
+        `Сначала показывает preview. После отдельного подтверждения добавляет колонки RS.GE и несопоставленные платежи. Доход и налог не изменяются.`;
 
     await ctx.replyWithMarkdown(helpText);
 });
@@ -654,6 +804,29 @@ bot.action(/^draft_cancel:(.+)$/, async (ctx) => {
     }
 });
 
+bot.action(/^reconcile_confirm:(.+)$/, async (ctx) => {
+    const token = ctx.match[1];
+    const accepted = settleReconciliationConfirmation(ctx.chat.id, token);
+    await ctx.answerCbQuery(accepted ? 'Подтверждение принято' : 'Это подтверждение уже недействительно');
+    if (accepted) {
+        await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => undefined);
+    }
+});
+
+bot.action(/^reconcile_cancel:(.+)$/, async (ctx) => {
+    const token = ctx.match[1];
+    const cancelled = settleReconciliationConfirmation(
+        ctx.chat.id,
+        token,
+        createFlowError('Синхронизация сверки отменена пользователем.', 'USER_CANCELLED')
+    );
+    await ctx.answerCbQuery(cancelled ? 'Синхронизация отменена' : 'Это подтверждение уже недействительно');
+    if (cancelled) {
+        await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => undefined);
+        await ctx.reply('Синхронизация отменена. Google Sheets не изменена.', getMainMenu());
+    }
+});
+
 // /payments или кнопка "🔍 Проверить оплаты"
 bot.hears(['🔍 Проверить оплаты', '/payments'], async (ctx) => {
     if (sessionState.fillInProgress) {
@@ -694,6 +867,27 @@ bot.hears(['✅ Проверить период', '/check'], async (ctx) => {
     setImmediate(() => {
         runPeriodCheckFlow(ctx).catch((err) => {
             logger.error('Фоновый процесс /check завершился с ошибкой:', err);
+        });
+    });
+});
+
+// /reconcile или подтверждаемая запись результатов сверки в Google Sheets.
+bot.hears(['🧩 Записать сверку', '/reconcile'], async (ctx) => {
+    if (sessionState.fillInProgress) {
+        return ctx.reply('⏳ Операция с RS.GE уже запущена. Завершите её или нажмите /cancel.');
+    }
+
+    sessionState.fillInProgress = true;
+    sessionState.fillChatId = ctx.chat.id;
+    sessionState.activeOperation = 'reconcile';
+    await ctx.reply(
+        '🧩 Готовлю сверку для записи. Сначала будет показан preview; ' +
+        'до подтверждения Google Sheets не изменяется.'
+    );
+
+    setImmediate(() => {
+        runReconciliationFlow(ctx).catch((err) => {
+            logger.error('Фоновый процесс /reconcile завершился с ошибкой:', err);
         });
     });
 });

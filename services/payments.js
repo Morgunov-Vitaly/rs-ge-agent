@@ -7,6 +7,7 @@
  * обязательно показывается пользователю.
  */
 
+const crypto = require('crypto');
 const { parseRecordPeriod } = require('../domain/dates');
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -41,6 +42,20 @@ function getRecordPeriod(record) {
     const period = parseRecordPeriod(record.date);
     if (!period) return '';
     return `${String(period.month).padStart(2, '0')}.${period.year}`;
+}
+
+function createPortalPaymentId(payment) {
+    const reference = String(payment?.reference || '').trim();
+    if (reference) return `rsge:${reference}`;
+
+    const source = [
+        payment?.paymentDate || '',
+        payment?.postedDate || '',
+        payment?.effectiveDate || '',
+        Number(payment?.amount || 0).toFixed(2),
+        String(payment?.description || '').replace(/\s+/g, ' ').trim()
+    ].join('|');
+    return `rsge-hash:${crypto.createHash('sha256').update(source).digest('hex').slice(0, 24)}`;
 }
 
 /**
@@ -167,8 +182,14 @@ function reconcilePayments(records, portalPayments) {
         });
     }
 
+    const importedPortalPaymentIds = new Set(
+        records.map(({ rsPaymentId }) => rsPaymentId).filter(Boolean)
+    );
     const untrackedPortalPayments = normalizedPortalPayments.filter(
-        (_payment, index) => !usedPortalIndexes.has(index)
+        (payment, index) => (
+            !usedPortalIndexes.has(index) &&
+            !importedPortalPaymentIds.has(createPortalPaymentId(payment))
+        )
     );
 
     return {
@@ -248,6 +269,7 @@ function formatPaymentReport(reconciliation, portalHistory) {
 }
 
 module.exports = {
+    createPortalPaymentId,
     groupSheetPayments,
     findUnpaidPeriods,
     reconcilePayments,

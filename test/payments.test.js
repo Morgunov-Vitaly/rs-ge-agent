@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+    createPortalPaymentId,
     groupSheetPayments,
     reconcilePayments,
     formatPaymentReport
@@ -79,4 +80,22 @@ test('parses Georgian payer-card dates and payment rows', () => {
         description: paymentRow[2],
         reference: '999999999999'
     });
+});
+
+test('does not report an imported portal-only payment as untracked again', () => {
+    const portalPayment = {
+        paymentDate: '2026-08-01',
+        postedDate: '2026-08-02',
+        amount: 12,
+        reference: 'fixture-imported-payment'
+    };
+    const result = reconcilePayments([
+        {
+            recordType: 'Платёж RS.GE',
+            rsPaymentId: createPortalPaymentId(portalPayment),
+            taxGel: 0
+        }
+    ], [portalPayment]);
+
+    assert.equal(result.untrackedPortalPayments.length, 0);
 });

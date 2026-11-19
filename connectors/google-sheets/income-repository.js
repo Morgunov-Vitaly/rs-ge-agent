@@ -5,7 +5,10 @@ function createGoogleSheetsIncomeRepository(sheetName = 'Лист1') {
         getAllRecords: () => sheets.getAllRecords(sheetName),
         getMonthlySummary: (year, month) => sheets.getMonthlySummary(year, month, sheetName),
         getYearlySummary: (year, throughMonth) => sheets.getYearlySummary(year, throughMonth, sheetName),
-        addIncomeRecord: (record) => sheets.addIncomeRecord(record, sheetName)
+        addIncomeRecord: (record) => sheets.addIncomeRecord(record, sheetName),
+        applyPaymentReconciliationPlan: (plan) => (
+            sheets.applyPaymentReconciliationPlan(plan, sheetName)
+        )
     });
 }
 

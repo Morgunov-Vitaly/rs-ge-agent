@@ -6,7 +6,12 @@ const { auditLog: defaultAuditLog } = require('../infrastructure/audit-log');
 function getPaymentHistoryYears(records, currentYear = new Date().getFullYear()) {
     const years = new Set([currentYear]);
     for (const record of records) {
-        for (const value of [record.date, record.paymentDate]) {
+        for (const value of [
+            record.date,
+            record.paymentDate,
+            record.rsPaymentDate,
+            record.rsPostedDate
+        ]) {
             const period = parseRecordPeriod(value);
             if (period && period.year >= 2016 && period.year <= currentYear) years.add(period.year);
         }

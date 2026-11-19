@@ -20,8 +20,79 @@ const HEADERS = [
     'Налог 1% (GEL)',
     'Дата оплаты',
     'Описание / Источник',
-    'Статус декларации'
+    'Статус декларации',
+    'Тип записи',
+    'Статус сверки RS.GE',
+    'Дата платежа RS.GE',
+    'Дата проводки RS.GE',
+    'Сумма оплаты RS.GE',
+    'ID платежа RS.GE',
+    'Дата сверки',
+    'Комментарий сверки'
 ];
+
+const BASE_HEADERS_COUNT = 9;
+const RECORD_TYPES = Object.freeze({
+    INCOME: 'Доход',
+    RS_GE_PAYMENT: 'Платёж RS.GE'
+});
+
+function isIncomeRecord(record) {
+    return !record.recordType || record.recordType === RECORD_TYPES.INCOME;
+}
+
+function reconciliationCells(record) {
+    return [
+        record.recordType || RECORD_TYPES.INCOME,
+        record.reconciliationStatus || '',
+        record.rsPaymentDate || '',
+        record.rsPostedDate || '',
+        record.rsPaymentAmount === null || record.rsPaymentAmount === undefined
+            ? ''
+            : record.rsPaymentAmount,
+        record.rsPaymentId || '',
+        record.reconciledAt || '',
+        record.reconciliationComment || ''
+    ];
+}
+
+function buildPaymentReconciliationBatchData(plan, sheetName = 'Лист1') {
+    if (!plan || !Array.isArray(plan.updates) || !Array.isArray(plan.inserts)) {
+        throw new Error('Некорректный план синхронизации платежей');
+    }
+
+    const data = [{
+        range: `${sheetName}!J1:Q1`,
+        values: [HEADERS.slice(BASE_HEADERS_COUNT)]
+    }];
+
+    for (const update of plan.updates) {
+        if (!Number.isInteger(update.rowIndex) || update.rowIndex < 2) {
+            throw new Error('План содержит некорректный номер обновляемой строки');
+        }
+        data.push({
+            range: `${sheetName}!J${update.rowIndex}:Q${update.rowIndex}`,
+            values: [reconciliationCells(update)]
+        });
+    }
+
+    for (const insertion of plan.inserts) {
+        if (!Number.isInteger(insertion.rowIndex) || insertion.rowIndex < 2) {
+            throw new Error('План содержит некорректный номер добавляемой строки');
+        }
+        data.push({
+            range: `${sheetName}!A${insertion.rowIndex}:Q${insertion.rowIndex}`,
+            values: [[
+                '', '', '', '', '', '', '',
+                insertion.description || 'Несопоставленный платеж RS.GE',
+                '',
+                ...reconciliationCells(insertion)
+            ]]
+        });
+    }
+
+    return data;
+}
 
 /**
  * Парсер чисел с поддержкой локализованных разделителей (запятая/точка)
@@ -76,14 +147,14 @@ async function initSheetHeaders(sheetName = 'Лист1') {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${sheetName}!A1:I1`
+            range: `${sheetName}!A1:Q1`
         });
 
         const rows = response.data.values;
         if (!rows || rows.length === 0 || rows[0].length === 0) {
             await sheets.spreadsheets.values.update({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${sheetName}!A1:I1`,
+                range: `${sheetName}!A1:Q1`,
                 valueInputOption: 'USER_ENTERED',
                 requestBody: {
                     values: [HEADERS]
@@ -107,7 +178,7 @@ async function getAllRecords(sheetName = 'Лист1') {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${sheetName}!A2:I`
+            range: `${sheetName}!A2:Q`
         });
 
         const rows = response.data.values || [];
@@ -122,9 +193,23 @@ async function getAllRecords(sheetName = 'Лист1') {
                 taxGel: parseNumber(r[5]),
                 paymentDate: r[6] || '',
                 description: r[7] || '',
-                status: r[8] || ''
+                status: r[8] || '',
+                recordType: r[9] || '',
+                reconciliationStatus: r[10] || '',
+                rsPaymentDate: r[11] || '',
+                rsPostedDate: r[12] || '',
+                rsPaymentAmount: r[13] === undefined || r[13] === '' ? null : parseNumber(r[13]),
+                rsPaymentId: r[14] || '',
+                reconciledAt: r[15] || '',
+                reconciliationComment: r[16] || ''
             }))
-            .filter((record) => record.date || record.amountOriginal || record.amountGel || record.status);
+            .filter((record) => (
+                record.date || record.amountOriginal || record.currency || record.rate ||
+                record.amountGel || record.taxGel || record.paymentDate || record.description ||
+                record.status || record.recordType || record.reconciliationStatus ||
+                record.rsPaymentDate || record.rsPostedDate || record.rsPaymentAmount !== null ||
+                record.rsPaymentId || record.reconciledAt || record.reconciliationComment
+            ));
     } catch (error) {
         if (sheetName === 'Лист1' && error.message.includes('Unable to parse range')) {
             return getAllRecords('Sheet1');
@@ -144,6 +229,7 @@ async function addIncomeRecord(record, sheetName = 'Лист1') {
 
     // Проверка дубликата по дате, сумме в валюте и валюте
     const isDuplicate = existing.some(item =>
+        isIncomeRecord(item) &&
         item.date === record.date &&
         Math.abs(item.amountOriginal - record.amountOriginal) < 0.001 &&
         item.currency.toUpperCase() === record.currency.toUpperCase()
@@ -166,12 +252,20 @@ async function addIncomeRecord(record, sheetName = 'Лист1') {
         record.taxGel,
         record.paymentDate || '',
         record.description || 'Банковский перевод',
-        record.status || 'Ожидает подачи'
+        record.status || 'Ожидает подачи',
+        RECORD_TYPES.INCOME,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        ''
     ];
 
     await sheets.spreadsheets.values.append({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${sheetName}!A:I`,
+        range: `${sheetName}!A:Q`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
             values: [newRow]
@@ -192,6 +286,7 @@ async function addIncomeRecord(record, sheetName = 'Лист1') {
 async function getMonthlySummary(year, month, sheetName = 'Лист1') {
     const all = await getAllRecords(sheetName);
     const monthRecords = all.filter(r => {
+        if (!isIncomeRecord(r)) return false;
         const period = parseRecordPeriod(r.date);
         return period && period.year === year && period.month === month;
     });
@@ -230,6 +325,7 @@ async function getMonthlySummary(year, month, sheetName = 'Лист1') {
 async function getYearlySummary(year, throughMonth = 12, sheetName = 'Лист1') {
     const all = await getAllRecords(sheetName);
     const records = all.filter((record) => {
+        if (!isIncomeRecord(record)) return false;
         const period = parseRecordPeriod(record.date);
         return period && period.year === year && period.month <= throughMonth;
     });
@@ -247,12 +343,64 @@ async function getYearlySummary(year, throughMonth = 12, sheetName = 'Лист1'
     };
 }
 
+async function applyPaymentReconciliationPlan(plan, sheetName = 'Лист1') {
+    const data = buildPaymentReconciliationBatchData(plan, sheetName);
+
+    const sheets = getSheetsClient();
+    let headerRow;
+    try {
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${sheetName}!A1:Q1`
+        });
+        headerRow = response.data.values?.[0] || [];
+    } catch (error) {
+        if (sheetName === 'Лист1' && error.message.includes('Unable to parse range')) {
+            return applyPaymentReconciliationPlan(plan, 'Sheet1');
+        }
+        throw error;
+    }
+
+    for (let index = 0; index < HEADERS.length; index += 1) {
+        const existing = String(headerRow[index] || '').trim();
+        if (!existing) continue;
+        if (existing !== HEADERS[index]) {
+            const error = new Error(
+                index < BASE_HEADERS_COUNT
+                    ? `Базовый заголовок ${index + 1} изменен: ожидался «${HEADERS[index]}»`
+                    : `Колонка ${index + 1} уже занята заголовком «${existing}»`
+            );
+            error.code = 'SHEET_RECONCILIATION_COLUMNS_CONFLICT';
+            throw error;
+        }
+    }
+
+    await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+            valueInputOption: 'USER_ENTERED',
+            data
+        }
+    });
+
+    return {
+        updatedRows: plan.updates.length,
+        insertedRows: plan.inserts.length,
+        headersAdded: HEADERS.slice(BASE_HEADERS_COUNT)
+    };
+}
+
 module.exports = {
+    HEADERS,
+    RECORD_TYPES,
+    buildPaymentReconciliationBatchData,
     initSheetHeaders,
     getAllRecords,
     addIncomeRecord,
     getMonthlySummary,
     getYearlySummary,
+    applyPaymentReconciliationPlan,
+    isIncomeRecord,
     parseNumber,
     parseRecordPeriod
 };
