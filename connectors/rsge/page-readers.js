@@ -23,6 +23,30 @@ async function waitForContract(locator, message, timeout) {
     }
 }
 
+function parseDeclarationRowMetadata(rowCells, rawStatus) {
+    const cells = rowCells.map((value) => String(value || '').trim());
+    const statusIndex = cells.findIndex((value) => value === rawStatus);
+    if (statusIndex < 0) return {};
+
+    const afterStatus = cells.slice(statusIndex + 1);
+    const parseAmount = (value) => {
+        const parsed = Number(String(value || '').replace(/\s/g, '').replace(',', '.'));
+        return Number.isFinite(parsed) ? parsed : null;
+    };
+    const metadata = {
+        assessmentGel: parseAmount(afterStatus[0]),
+        reductionGel: parseAmount(afterStatus[1]),
+        declarationNumber: afterStatus[2] || '',
+        registrationNumber: afterStatus[3] || '',
+        submittedAt: afterStatus[4] || '',
+        createdAt: afterStatus[6] || ''
+    };
+
+    return Object.fromEntries(
+        Object.entries(metadata).filter(([, value]) => value !== '' && value !== null)
+    );
+}
+
 async function readSmallBusinessDraftPage(page, expectedPeriod, options = {}) {
     const timeout = options.timeout || 10000;
     const periodInput = page.locator('#control_0_m input.d_value');
@@ -59,6 +83,7 @@ async function readSmallBusinessDraftPage(page, expectedPeriod, options = {}) {
         : (/გაგზავნილ|გადაგზავნილ|sent/i.test(rawStatus)
             ? 'Sent'
             : (rawStatus || 'Неизвестен'));
+    const metadata = parseDeclarationRowMetadata(rowCells, rawStatus);
 
     await viewButtons.first().click();
     const draftWindow = page.locator('.window_panel').filter({
@@ -85,6 +110,7 @@ async function readSmallBusinessDraftPage(page, expectedPeriod, options = {}) {
     return {
         exists: true,
         status,
+        metadata,
         fields,
         screenshotBuffer: await draftWindow.screenshot()
     };
@@ -105,6 +131,7 @@ async function readPayerCardTable(page, options = {}) {
 module.exports = {
     DECLARATION_FIELD_NUMBERS,
     detectLoginState,
+    parseDeclarationRowMetadata,
     readSmallBusinessDraftPage,
     readPayerCardTable
 };

@@ -1,6 +1,33 @@
 const { ACTION_RISKS } = require('../core/action-contract');
 const { auditLog: defaultAuditLog } = require('../infrastructure/audit-log');
 
+function compareDeclarationWithSummaries(draft, summary, yearSummary) {
+    if (!draft?.exists) {
+        return {
+            incomeMatches: false,
+            taxMatches: false,
+            cumulativeMatches: false,
+            valuesMatch: false,
+            rsStatusIsSent: false,
+            statusMismatch: Boolean(summary?.isFiled)
+        };
+    }
+
+    const incomeMatches = Math.abs(draft.fields[20] - summary.totalIncomeGel) <= 0.02;
+    const taxMatches = Math.abs(draft.fields[26] - summary.totalTaxGel) <= 0.02;
+    const cumulativeMatches = Math.abs(draft.fields[15] - yearSummary.totalIncomeGel) <= 0.02;
+    const rsStatusIsSent = /sent|подан|გაგზავნილ|გადაგზავნილ/i.test(draft.status || '');
+
+    return {
+        incomeMatches,
+        taxMatches,
+        cumulativeMatches,
+        valuesMatch: incomeMatches && taxMatches && cumulativeMatches,
+        rsStatusIsSent,
+        statusMismatch: Boolean(summary.isFiled) !== rsStatusIsSent
+    };
+}
+
 async function executeDeclarationReview({
     recordsRepository,
     rsGeClient,
@@ -34,17 +61,7 @@ async function executeDeclarationReview({
             return { summary, yearSummary, draft, exists: false };
         }
 
-        const incomeMatches = Math.abs(draft.fields[20] - summary.totalIncomeGel) < 0.01;
-        const taxMatches = Math.abs(draft.fields[26] - summary.totalTaxGel) < 0.01;
-        const cumulativeMatches = Math.abs(draft.fields[15] - yearSummary.totalIncomeGel) <= 0.02;
-        const rsStatusIsSent = /sent|подан|გაგზავნილ/i.test(draft.status || '');
-        const comparison = {
-            incomeMatches,
-            taxMatches,
-            cumulativeMatches,
-            valuesMatch: incomeMatches && taxMatches && cumulativeMatches,
-            statusMismatch: summary.isFiled && !rsStatusIsSent
-        };
+        const comparison = compareDeclarationWithSummaries(draft, summary, yearSummary);
 
         await auditLog.record({
             action: 'small-business.review-declaration',
@@ -67,4 +84,4 @@ async function executeDeclarationReview({
     }
 }
 
-module.exports = { executeDeclarationReview };
+module.exports = { compareDeclarationWithSummaries, executeDeclarationReview };

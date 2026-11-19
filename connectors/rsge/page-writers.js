@@ -101,6 +101,7 @@ async function writeSmallBusinessDraftPage(page, preview, options = {}) {
     const createButton = await requireVisible([
         page.getByRole('button', { name: /ახალი დეკლარაცია|new (?:return|declaration)/i }),
         page.getByRole('link', { name: /ახალი დეკლარაცია|new (?:return|declaration)/i }),
+        page.getByRole('cell', { name: /^(?:ახალი დეკლარაცია|new (?:return|declaration))$/i }),
         page.locator('[data-action="new-declaration"]'),
         page.locator('input[type="button"][value*="ახალი დეკლარაცია"]')
     ], 'safe new-declaration control was not found');
@@ -142,6 +143,7 @@ async function writeSmallBusinessDraftPage(page, preview, options = {}) {
     const saveButton = await requireVisible([
         draftWindow.getByRole('button', { name: /^(?:შენახვა|save(?: draft)?)$/i }),
         draftWindow.getByRole('link', { name: /^(?:შენახვა|save(?: draft)?)$/i }),
+        draftWindow.getByRole('cell', { name: /^(?:შენახვა|save(?: draft)?)$/i }),
         draftWindow.locator('[data-action="save-draft"]'),
         draftWindow.locator('input[type="button"][value="შენახვა"]')
     ], 'safe save-draft control was not found');

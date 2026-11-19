@@ -253,7 +253,8 @@ Retention должен быть настраиваемым для self-hosted у
 ### P1 — Надежный single-user MVP
 
 - импорт CSV/XLSX банков;
-- полный read-only health/status dashboard;
+- [x] единая read-only проверка закрытия периода: декларация, суммы, оплата и задолженность;
+- полный read-only health/status dashboard для нескольких периодов и сервисов;
 - [x] подготовка и сохранение нового черновика с preview, подтверждением и `DRAFT_WRITE`;
 - подтверждаемая финальная отправка как отдельная операция `IRREVERSIBLE`;
 - PDF-подтверждение и audit trail;

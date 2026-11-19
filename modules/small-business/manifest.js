@@ -2,12 +2,13 @@ const { ACTION_RISKS, defineModule } = require('../../core/action-contract');
 const { executePaymentReconciliation } = require('../../workflows/payment-reconciliation');
 const { executeDeclarationReview } = require('../../workflows/declaration-review');
 const { executeDeclarationDraftCreation } = require('../../workflows/declaration-draft');
+const { executePeriodCheck } = require('../../workflows/period-check');
 
 module.exports = defineModule({
     id: 'small-business',
-    version: '0.2.0',
+    version: '0.3.0',
     name: 'Small Business Tax',
-    capabilities: ['review-declaration', 'create-declaration-draft', 'reconcile-payments'],
+    capabilities: ['review-declaration', 'create-declaration-draft', 'reconcile-payments', 'check-period'],
     actions: [
         {
             id: 'review-declaration',
@@ -23,6 +24,11 @@ module.exports = defineModule({
             id: 'reconcile-payments',
             risk: ACTION_RISKS.READ_ONLY,
             handler: executePaymentReconciliation
+        },
+        {
+            id: 'check-period',
+            risk: ACTION_RISKS.READ_ONLY,
+            handler: executePeriodCheck
         }
     ]
 });

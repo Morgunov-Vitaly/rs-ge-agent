@@ -79,6 +79,14 @@ test('recognizes the current Georgian sent status used by RS.GE', async () => {
         assert.equal(result.fields[15], 71617.04);
         assert.equal(result.fields[20], 7277.76);
         assert.equal(result.fields[26], 72.78);
+        assert.deepEqual(result.metadata, {
+            assessmentGel: 72.78,
+            reductionGel: 0,
+            declarationNumber: 'fixture-declaration-number',
+            registrationNumber: 'fixture-registration',
+            submittedAt: '17.11.2026 21:16',
+            createdAt: '17.11.2026 21:10'
+        });
     });
 });
 

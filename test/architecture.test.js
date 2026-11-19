@@ -50,7 +50,12 @@ test('module contract rejects unsafe or incomplete actions', () => {
     assert.equal(smallBusinessModule.id, 'small-business');
     assert.deepEqual(
         smallBusinessModule.actions.map(({ risk }) => risk),
-        [ACTION_RISKS.READ_ONLY, ACTION_RISKS.DRAFT_WRITE, ACTION_RISKS.READ_ONLY]
+        [
+            ACTION_RISKS.READ_ONLY,
+            ACTION_RISKS.DRAFT_WRITE,
+            ACTION_RISKS.READ_ONLY,
+            ACTION_RISKS.READ_ONLY
+        ]
     );
 });
 
