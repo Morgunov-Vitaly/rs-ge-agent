@@ -37,6 +37,19 @@ const RS_MONTHS = {
     დეკ: 12
 };
 
+function parseDeclarationGridCount(payload) {
+    try {
+        const decoded = typeof payload?.d === 'string'
+            ? JSON.parse(payload.d)
+            : payload;
+        const countValue = decoded?.sums?.find((item) => item?.COUNT !== undefined)?.COUNT;
+        const count = Number(countValue);
+        return Number.isFinite(count) && count >= 0 ? count : null;
+    } catch {
+        return null;
+    }
+}
+
 if (!fs.existsSync(SCREENSHOTS_DIR)) {
     fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 }
@@ -248,14 +261,27 @@ async function openSmallBusinessDeclarations(page, expectedPeriod) {
     }, { timeout: 30000 });
     await page.getByRole('cell', { name: SMALL_BUSINESS_TAX_NAME }).click();
     try {
-        await gridResponse;
+        const response = await gridResponse;
+        const declarationCount = parseDeclarationGridCount(
+            await response.json().catch(() => null)
+        );
         await page.locator('#control_0_g3g').waitFor({ state: 'attached', timeout: 10000 });
         await page.waitForFunction(() => {
             const grid = document.querySelector('#control_0_g3g');
             return grid && grid.classList.contains('end_out');
         }, undefined, { timeout: 10000 });
-        // jQuery grid inserts rows immediately after resolving its data request.
-        await page.waitForTimeout(100);
+
+        // RS.GE resolves the grid request before jQuery inserts its rows into
+        // the DOM. When the response says that declarations exist, wait for a
+        // real visible row instead of relying on a fixed delay.
+        if (declarationCount > 0) {
+            await page.locator('#control_0_g3g img[src$="view.png"]:visible')
+                .first()
+                .waitFor({ state: 'visible', timeout: 10000 });
+        } else if (declarationCount === null) {
+            // Backward-compatible fallback if RS.GE changes the response shape.
+            await page.waitForTimeout(500);
+        }
     } catch (cause) {
         const error = new Error('RS.GE page contract changed: declaration grid did not finish loading');
         error.code = 'RSGE_PAGE_CONTRACT_CHANGED';
@@ -555,6 +581,7 @@ module.exports = {
     parseRsGeDate,
     parsePaymentOrderDate,
     parsePayerCardRows,
+    parseDeclarationGridCount,
     refreshPayerCardData,
     triggerPayerCardRefresh,
     launchBrowser,

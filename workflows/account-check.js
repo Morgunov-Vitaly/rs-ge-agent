@@ -18,6 +18,16 @@ function countReconciliationStatuses(reconciliation) {
     return counts;
 }
 
+function formatRussianCount(count, one, few, many) {
+    const absolute = Math.abs(Number(count));
+    const lastTwo = absolute % 100;
+    const last = absolute % 10;
+    const word = lastTwo >= 11 && lastTwo <= 14
+        ? many
+        : (last === 1 ? one : (last >= 2 && last <= 4 ? few : many));
+    return `${count} ${word}`;
+}
+
 function buildAccountCheckReport(periodCheck, reconciliationPreview) {
     const reconciliation = periodCheck.reconciliation;
     const counts = countReconciliationStatuses(reconciliation);
@@ -38,12 +48,12 @@ function buildAccountCheckReport(periodCheck, reconciliationPreview) {
         periodCheck.report.replace(/\n\nДанные на RS\.GE и в Google Sheets не изменялись\.$/, ''),
         '',
         'История оплат:',
-        `• Совпадает: ${counts.matched}`,
-        `• Расхождение даты: ${counts.dateMismatch}`,
-        `• Расхождение суммы: ${counts.amountMismatch}`,
-        `• Не найдено на RS.GE: ${counts.missingOnPortal}`,
-        `• Без даты оплаты в таблице: ${unpaid}`,
-        `• Только на RS.GE: ${untracked}`
+        `• Совпадает: ${formatRussianCount(counts.matched, 'запись', 'записи', 'записей')}`,
+        `• Расхождение даты: ${formatRussianCount(counts.dateMismatch, 'запись', 'записи', 'записей')}`,
+        `• Расхождение суммы: ${formatRussianCount(counts.amountMismatch, 'запись', 'записи', 'записей')}`,
+        `• Не найдено на RS.GE: ${formatRussianCount(counts.missingOnPortal, 'запись', 'записи', 'записей')}`,
+        `• Без даты оплаты в таблице: ${formatRussianCount(unpaid, 'период', 'периода', 'периодов')}`,
+        `• Только на RS.GE: ${formatRussianCount(untracked, 'платёж', 'платежа', 'платежей')}`
     ];
 
     if (issueCount === 0) {
@@ -82,5 +92,6 @@ async function executeAccountCheck(options) {
 module.exports = {
     buildAccountCheckReport,
     countReconciliationStatuses,
+    formatRussianCount,
     executeAccountCheck
 };

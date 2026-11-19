@@ -85,12 +85,17 @@ function buildPeriodCheckReport(result) {
     lines.push(`Google Sheets: ${summary.status || 'статус не указан'}; ${sheetPayment}`);
 
     const warnings = [];
-    if (!declaration.exists) warnings.push('На RS.GE нет декларации за выбранный период.');
-    else if (!declarationComparison.rsStatusIsSent) warnings.push('Декларация на RS.GE не отправлена.');
+    if (!declaration.exists) {
+        warnings.push(summary.isFiled
+            ? 'Автоматическая проверка не нашла декларацию на RS.GE, хотя в Google Sheets она отмечена как поданная.'
+            : 'Автоматическая проверка не нашла декларацию за выбранный период на RS.GE.');
+    } else if (!declarationComparison.rsStatusIsSent) {
+        warnings.push('Декларация на RS.GE не отправлена.');
+    }
     if (!declarationComparison.valuesMatch && declaration.exists) {
         warnings.push('Суммы декларации не совпадают с Google Sheets.');
     }
-    if (declarationComparison.statusMismatch) {
+    if (declaration.exists && declarationComparison.statusMismatch) {
         warnings.push('Статус подачи в Google Sheets не совпадает со статусом RS.GE.');
     }
     if (!paymentSatisfied) warnings.push('Оплата периода не подтверждена автоматической сверкой.');

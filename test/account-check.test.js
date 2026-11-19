@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildAccountCheckReport } = require('../workflows/account-check');
+const {
+    buildAccountCheckReport,
+    formatRussianCount
+} = require('../workflows/account-check');
 
 function createPeriodCheck(overrides = {}) {
     return {
@@ -23,9 +26,15 @@ test('unified account check recommends reconciliation only for unwritten changes
     assert.equal(result.issueCount, 1);
     assert.equal(result.needsReconciliation, true);
     assert.match(result.report, /История оплат/);
-    assert.match(result.report, /Расхождение даты: 1/);
+    assert.match(result.report, /Расхождение даты: 1 запись/);
     assert.match(result.report, /можно записать в таблицу/);
     assert.doesNotMatch(result.report, /автоматически не изменялись/);
+});
+
+test('account check uses clear Russian count units', () => {
+    assert.equal(formatRussianCount(1, 'запись', 'записи', 'записей'), '1 запись');
+    assert.equal(formatRussianCount(3, 'запись', 'записи', 'записей'), '3 записи');
+    assert.equal(formatRussianCount(12, 'запись', 'записи', 'записей'), '12 записей');
 });
 
 test('unified account check does not offer a redundant write', () => {

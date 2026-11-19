@@ -1,6 +1,6 @@
 {
   "name": "rs-ge-agent",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "AI agent for rs.ge automation",
   "license": "AGPL-3.0-only",
   "repository": {

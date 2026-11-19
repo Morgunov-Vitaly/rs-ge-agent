@@ -13,6 +13,7 @@ const {
     ACCOUNTING_URL,
     acknowledgePayerCardNotice,
     launchBrowser,
+    parseDeclarationGridCount,
     parsePayerCardRows,
     refreshPayerCardData
 } = require('../services/playwright');
@@ -23,6 +24,12 @@ let browser;
 test('opens the payer-card tab directly instead of relying on a legacy tab click', () => {
     assert.match(ACCOUNTING_URL, /[?&]tab=tabPayerCard(?:&|$)/);
     assert.doesNotMatch(ACCOUNTING_URL, /tabComparisoAct/);
+});
+
+test('reads the expected declaration count from the RS.GE grid response', () => {
+    assert.equal(parseDeclarationGridCount({ d: '{"sums":[{"COUNT":1}]}' }), 1);
+    assert.equal(parseDeclarationGridCount({ d: '{"sums":[{"COUNT":0}]}' }), 0);
+    assert.equal(parseDeclarationGridCount({ d: 'unexpected' }), null);
 });
 
 async function withFixture(name, callback) {

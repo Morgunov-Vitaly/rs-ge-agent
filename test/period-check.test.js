@@ -119,3 +119,20 @@ test('requires attention when the declaration is not sent and debt remains', asy
     assert.match(result.report, /Декларация на RS.GE не отправлена/);
     assert.match(result.report, /есть задолженность/);
 });
+
+test('explains a missing portal declaration as one consolidated warning', async () => {
+    const result = await executePeriodCheck({
+        ...createScenario({ declaration: { exists: false } }),
+        year: 2026,
+        month: 10,
+        currentYear: 2026,
+        auditLog: createMemoryAuditLog()
+    });
+
+    assert.equal(result.verdict, 'attention');
+    assert.match(
+        result.report,
+        /не нашла декларацию на RS\.GE, хотя в Google Sheets она отмечена как поданна/
+    );
+    assert.doesNotMatch(result.report, /Статус подачи в Google Sheets не совпадает/);
+});
