@@ -19,6 +19,7 @@ const { submitSmallBusinessDeclarationPage } = require('../connectors/rsge/page-
 
 const SESSION_STORAGE_PATH = config.rsGe.sessionStoragePath;
 const SCREENSHOTS_DIR = config.rsGe.screenshotsDir;
+const LOGIN_URL = 'https://eservices.rs.ge/Login.aspx?redirect_url=http://eservices.rs.ge/Login.aspx';
 const MAIN_PAGE_URL = 'https://eservices.rs.ge/MainPage.aspx';
 const DECLARATIONS_URL = 'https://decl.rs.ge/decls.aspx';
 const ACCOUNTING_URL = 'https://eservices.rs.ge/Accounting.aspx?tab=tabPayerCard';
@@ -85,13 +86,13 @@ async function launchBrowser(headless = true) {
 /**
  * Создание контекста с возможностью переиспользования сохраненной сессии
  */
-async function createBrowserContext(browser) {
+async function createBrowserContext(browser, useSavedSession = true) {
     let contextOptions = {
         viewport: { width: 1280, height: 800 },
         userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     };
 
-    if (fs.existsSync(SESSION_STORAGE_PATH)) {
+    if (useSavedSession && fs.existsSync(SESSION_STORAGE_PATH)) {
         try {
             contextOptions.storageState = SESSION_STORAGE_PATH;
             logger.info('Загружена сохраненная сессия из session_state.json');
@@ -115,6 +116,35 @@ async function saveRuntimeScreenshot(fileName, screenshotBuffer) {
     }
 }
 
+async function waitForLoginStep(page, timeout = 15000) {
+    try {
+        await Promise.any([
+            page.locator('#smsText').waitFor({ state: 'visible', timeout }),
+            page.waitForURL(
+                (url) => !url.toString().toLowerCase().includes('login.aspx'),
+                { timeout }
+            )
+        ]);
+    } catch {
+        // The page state below is more useful to the user than a selector timeout.
+    }
+
+    const state = await detectLoginState(page);
+    if (state === 'credentials') {
+        const error = new Error(
+            'RS.GE оставил форму входа открытой и не показал поле SMS. Проверьте RS_USERNAME и RS_PASSWORD в .env, затем повторите попытку. Если вход через сайт работает, попробуйте позже: портал мог отклонить запрос.'
+        );
+        error.code = 'RSGE_SMS_NOT_SHOWN';
+        throw error;
+    }
+    if (state !== 'sms' && page.url().toLowerCase().includes('login.aspx')) {
+        const error = new Error('RS.GE не подтвердил вход и не показал поле SMS. Повторите попытку позже.');
+        error.code = 'RSGE_LOGIN_UNCONFIRMED';
+        throw error;
+    }
+    return state;
+}
+
 /**
  * Авторизация на eservices.rs.ge с точными селекторами (#username, #password, #btnLogin, #smsText)
  * @param {Function} onSmsRequired - callback: async (screenshotBuffer) => string (возвращает sms код)
@@ -133,7 +163,7 @@ async function loginToRsGe(onSmsRequired) {
         page = await context.newPage();
 
         logger.info('Открываем https://eservices.rs.ge/Login.aspx...');
-        await page.goto('https://eservices.rs.ge/Login.aspx?redirect_url=http://eservices.rs.ge/Login.aspx', {
+        await page.goto(LOGIN_URL, {
             waitUntil: 'domcontentloaded',
             timeout: 60000
         });
@@ -145,6 +175,14 @@ async function loginToRsGe(onSmsRequired) {
             return { browser, context, page, isLoggedIn: true };
         }
 
+        if (fs.existsSync(SESSION_STORAGE_PATH)) {
+            logger.info('Сохраненная сессия RS.GE больше не действует. Повторяем вход в чистом контексте.');
+            await context.close();
+            context = await createBrowserContext(browser, false);
+            page = await context.newPage();
+            await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        }
+
         logger.info('Вводим логин и пароль...');
         await page.locator('#username').fill(config.rsGe.username);
         await page.locator('#password').fill(config.rsGe.password);
@@ -153,8 +191,13 @@ async function loginToRsGe(onSmsRequired) {
         await page.locator('#btnLogin').click();
 
         // Ожидаем появления поля ввода SMS
-        logger.info('Ожидаем появления #smsText...');
-        await page.waitForSelector('#smsText', { state: 'visible', timeout: 15000 });
+        logger.info('Ожидаем подтверждения входа или появления SMS...');
+        const loginStep = await waitForLoginStep(page);
+        if (loginStep === 'authenticated') {
+            await context.storageState({ path: SESSION_STORAGE_PATH });
+            logger.info('Вход подтвержден без SMS, сессия сохранена.');
+            return { browser, context, page, isLoggedIn: true };
+        }
         logger.info('Поле ввода SMS (#smsText) появилось на экране.');
 
         const screenshotPath = path.join(SCREENSHOTS_DIR, 'login_step.png');
@@ -598,5 +641,6 @@ module.exports = {
     refreshPayerCardData,
     triggerPayerCardRefresh,
     launchBrowser,
-    createBrowserContext
+    createBrowserContext,
+    waitForLoginStep
 };

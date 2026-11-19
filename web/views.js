@@ -298,7 +298,13 @@ function operationView({ session, operation }) {
                 <div class="operation-icon status-${statusClass}">${completed && result.verdict === 'closed' ? icon('check') : (failed ? icon('alert') : icon('refresh'))}</div>
                 <p class="eyebrow">Безопасная проверка · READ_ONLY</p>
                 <h1>${escapeHtml(heading)}</h1>
-                <p class="lead">${waitingSms ? 'RS.GE отправил одноразовый код на привязанный телефон.' : (pending ? 'Читаем данные портала и сравниваем их с Google Sheets.' : 'Проверка завершена без изменения данных на портале и в таблице.')}</p>
+                <p class="lead">${waitingSms
+                    ? 'RS.GE отправил одноразовый код на привязанный телефон.'
+                    : (pending
+                        ? 'Читаем данные портала и сравниваем их с Google Sheets.'
+                        : (failed
+                            ? 'Не удалось получить подтвержденные данные RS.GE. Данные на портале и в таблице не менялись.'
+                            : 'Проверка завершена без изменения данных на портале и в таблице.'))}</p>
                 ${body}
             </section>
         </main>`

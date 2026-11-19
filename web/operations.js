@@ -109,7 +109,7 @@ function createOperationManager({
             logger.error('Web account check failed:', error);
             update(operation, {
                 status: 'failed',
-                error: error.code === 'SMS_TIMEOUT'
+                error: ['SMS_TIMEOUT', 'RSGE_SMS_NOT_SHOWN', 'RSGE_LOGIN_UNCONFIRMED'].includes(error.code)
                     ? error.message
                     : 'Проверка не завершена. Повторите попытку или проверьте журнал сервера.'
             });

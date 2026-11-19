@@ -16,7 +16,8 @@ const {
     launchBrowser,
     parseDeclarationGridCount,
     parsePayerCardRows,
-    refreshPayerCardData
+    refreshPayerCardData,
+    waitForLoginStep
 } = require('../services/playwright');
 
 const FIXTURES_DIR = path.join(__dirname, 'fixtures', 'rsge');
@@ -66,6 +67,18 @@ test('recognizes credentials, SMS and authenticated login states', async () => {
     } finally {
         await page.close();
     }
+});
+
+test('login step explains when RS.GE leaves the credentials form open', async () => {
+    await withFixture('login-credentials.html', async (page) => {
+        await assert.rejects(
+            waitForLoginStep(page, 50),
+            ({ code, message }) => code === 'RSGE_SMS_NOT_SHOWN' && /не показал поле SMS/.test(message)
+        );
+    });
+    await withFixture('login-sms.html', async (page) => {
+        assert.equal(await waitForLoginStep(page, 50), 'sms');
+    });
 });
 
 test('does not treat the hidden RS.GE template row as a declaration', async () => {

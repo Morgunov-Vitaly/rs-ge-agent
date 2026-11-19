@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createOperationManager } = require('../web/operations');
+const { operationView } = require('../web/views');
 
 async function waitFor(getValue, predicate, timeoutMs = 1_000) {
     const startedAt = Date.now();
@@ -95,4 +96,29 @@ test('web operation manager permits only one active RS.GE browser flow', async (
         () => manager.get({ id: first.id, sessionId: 'one' }),
         (operation) => operation.status === 'completed'
     );
+});
+
+test('web operation reports an actionable login error without exposing a false success', async () => {
+    const error = new Error('RS.GE не показал поле SMS. Проверьте данные входа.');
+    error.code = 'RSGE_SMS_NOT_SHOWN';
+    const manager = createOperationManager({
+        loginToRsGe: async () => { throw error; },
+        createRsGeClient: () => ({}),
+        executeAccountCheck: async () => { throw new Error('must not run'); },
+        recordsRepository: {},
+        logger: { error() {}, warn() {} }
+    });
+    const started = manager.start({ sessionId: 'one', year: 2026, month: 10 });
+    const failed = await waitFor(
+        () => manager.get({ id: started.id, sessionId: 'one' }),
+        (operation) => operation.status === 'failed'
+    );
+    assert.match(failed.error, /Проверьте данные входа/);
+    assert.equal(failed.result, null);
+    const html = operationView({
+        session: { csrfToken: 'test-csrf' },
+        operation: failed
+    });
+    assert.match(html, /Проверка не завершена/);
+    assert.doesNotMatch(html, /Проверка завершена без изменения данных/);
 });

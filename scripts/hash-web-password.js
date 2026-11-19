@@ -19,7 +19,7 @@ async function main() {
         console.log(password);
         console.log('');
     }
-    console.log(`WEB_PASSWORD_HASH=${encoded}`);
+    console.log(`WEB_PASSWORD_HASH='${encoded}'`);
 }
 
 main().catch((error) => {
