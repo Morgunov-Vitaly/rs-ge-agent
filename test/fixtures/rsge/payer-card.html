@@ -1,5 +1,8 @@
 <!doctype html>
 <html lang="ka">
+<head>
+    <base href="https://eservices.rs.ge/">
+</head>
 <body>
     <div
         class="rsButton"
@@ -38,7 +41,12 @@
         </tbody>
     </table>
     <script>
-        window.updateGrdPayerCard = () => {
+        window.updateGrdPayerCard = async () => {
+            const response = await fetch(
+                '/WebServices/hsAccounting.ashx/GetPayerCards',
+                { method: 'POST' }
+            );
+            await response.json();
             document.body.dataset.refreshTriggered = 'yes';
         };
         document.querySelector('.rsGridMaxRows').addEventListener('change', (event) => {

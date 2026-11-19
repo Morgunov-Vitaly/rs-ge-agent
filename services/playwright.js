@@ -399,6 +399,28 @@ async function triggerPayerCardRefresh(page) {
     });
 }
 
+async function refreshPayerCardData(page, timeout = 30000) {
+    const [response] = await Promise.all([
+        page.waitForResponse(
+            (candidate) => (
+                candidate.url().endsWith('/WebServices/hsAccounting.ashx/GetPayerCards') &&
+                candidate.request().method() === 'POST' &&
+                candidate.status() === 200
+            ),
+            { timeout }
+        ),
+        triggerPayerCardRefresh(page)
+    ]);
+    await response.finished();
+    // The legacy callback updates the grid only after parsing the response body.
+    await page.waitForTimeout(750);
+    return response;
+}
+
+function hasPayerCardData(parsed) {
+    return Boolean(parsed.balance) || parsed.payments.length > 0 || parsed.charges.length > 0;
+}
+
 /**
  * Читает личную карточку налогоплательщика за указанные календарные годы.
  * Функция только читает данные и ничего не изменяет на RS.GE.
@@ -451,51 +473,47 @@ async function getPaymentHistory(page, options = {}) {
         await setRsGeDate(page, '#dpPayerCardStart', new Date(Date.UTC(year, 0, 1)));
         await setRsGeDate(page, '#dpPayerCardEnd', endDate);
 
-        await Promise.all([
-            page.waitForResponse(
-                (response) => (
-                    response.url().endsWith('/WebServices/hsAccounting.ashx/GetPayerCards') &&
-                    response.request().method() === 'POST' &&
-                    response.status() === 200
-                ),
-                { timeout: 30000 }
-            ),
+        let parsed;
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
             // The legacy page can render a hidden duplicate of the visual button.
             // Invoke its own read-only refresh function instead of clicking a
             // presentation element whose visibility changes between layouts.
-            triggerPayerCardRefresh(page)
-        ]);
-        await page.waitForTimeout(500);
+            await refreshPayerCardData(page);
 
-        const alert = page.locator('#rsAlert');
-        if (await alert.isVisible().catch(() => false)) {
-            const alertText = (await alert.innerText()).replace(/\s+/g, ' ').trim();
-            throw new Error(`RS.GE не смог загрузить личную карточку за ${year} год: ${alertText}`);
-        }
-
-        const pageSize = page.locator('#rsGrid_grdPayerCard select.rsGridMaxRows');
-        if (await pageSize.count()) {
-            const gridText = await page.locator('#rsGrid_grdPayerCard').innerText();
-            const totalRows = Number(gridText.match(/(\d+)\s*ჩანაწერი/)?.[1] || 0);
-            // RS.GE hides the native select behind a custom pager widget.
-            // force still dispatches the native input/change events expected by
-            // the grid while avoiding a click on the hidden presentation control.
-            await pageSize.selectOption('300', { force: true });
-            if (totalRows > 10) {
-                await page.waitForFunction(
-                    ({ selector, expectedRows }) => (
-                        Array.from(document.querySelectorAll(`${selector} tr`))
-                            .filter((row) => row.querySelectorAll('td').length === 20)
-                            .length >= expectedRows
-                    ),
-                    { selector: '#rsGrid_grdPayerCard', expectedRows: totalRows },
-                    { timeout: 10000 }
-                );
+            const alert = page.locator('#rsAlert');
+            if (await alert.isVisible().catch(() => false)) {
+                const alertText = (await alert.innerText()).replace(/\s+/g, ' ').trim();
+                throw new Error(`RS.GE не смог загрузить личную карточку за ${year} год: ${alertText}`);
             }
+
+            const pageSize = page.locator('#rsGrid_grdPayerCard select.rsGridMaxRows');
+            if (await pageSize.count()) {
+                const gridText = await page.locator('#rsGrid_grdPayerCard').innerText();
+                const totalRows = Number(gridText.match(/(\d+)\s*ჩანაწერი/)?.[1] || 0);
+                // RS.GE hides the native select behind a custom pager widget.
+                // force still dispatches the native input/change events expected by
+                // the grid while avoiding a click on the hidden presentation control.
+                await pageSize.selectOption('300', { force: true });
+                if (totalRows > 10) {
+                    await page.waitForFunction(
+                        ({ selector, expectedRows }) => (
+                            Array.from(document.querySelectorAll(`${selector} tr`))
+                                .filter((row) => row.querySelectorAll('td').length === 20)
+                                .length >= expectedRows
+                        ),
+                        { selector: '#rsGrid_grdPayerCard', expectedRows: totalRows },
+                        { timeout: 10000 }
+                    );
+                }
+            }
+
+            const rows = await readPayerCardTable(page);
+            parsed = parsePayerCardRows(rows);
+            if (hasPayerCardData(parsed) || attempt === 2) break;
+
+            logger.warn(`RS.GE вернул пустую карточку за ${year} год; повторяем чтение один раз.`);
         }
 
-        const rows = await readPayerCardTable(page);
-        const parsed = parsePayerCardRows(rows);
         allPayments.push(...parsed.payments);
         allCharges.push(...parsed.charges);
         if (year === years.at(-1)) latestBalance = parsed.balance;
@@ -518,6 +536,7 @@ module.exports = {
     parseRsGeDate,
     parsePaymentOrderDate,
     parsePayerCardRows,
+    refreshPayerCardData,
     triggerPayerCardRefresh,
     launchBrowser,
     createBrowserContext

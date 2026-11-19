@@ -12,7 +12,7 @@ const { writeSmallBusinessDraftPage } = require('../connectors/rsge/page-writers
 const {
     launchBrowser,
     parsePayerCardRows,
-    triggerPayerCardRefresh
+    refreshPayerCardData
 } = require('../services/playwright');
 
 const FIXTURES_DIR = path.join(__dirname, 'fixtures', 'rsge');
@@ -168,7 +168,10 @@ test('fails safely on an unexpected period or unknown declaration DOM', async ()
 
 test('reads and parses sanitized payer-card rows', async () => {
     await withFixture('payer-card.html', async (page) => {
-        await triggerPayerCardRefresh(page);
+        await page.route('**/WebServices/hsAccounting.ashx/GetPayerCards', (route) => (
+            route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+        ));
+        await refreshPayerCardData(page, 1000);
         assert.equal(await page.locator('body').getAttribute('data-refresh-triggered'), 'yes');
         await page.locator('#rsGrid_grdPayerCard select.rsGridMaxRows').selectOption(
             '300',
