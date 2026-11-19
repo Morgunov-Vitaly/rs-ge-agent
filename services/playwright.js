@@ -89,6 +89,18 @@ async function createBrowserContext(browser) {
     return await browser.newContext(contextOptions);
 }
 
+async function saveRuntimeScreenshot(fileName, screenshotBuffer) {
+    try {
+        await fs.promises.writeFile(path.join(SCREENSHOTS_DIR, fileName), screenshotBuffer);
+        return true;
+    } catch (error) {
+        // Скриншот — диагностический артефакт, а не результат операции.
+        // Особенно важно не сообщать failure после уже выполненного DRAFT_WRITE.
+        logger.warn(`Не удалось сохранить временный скриншот ${fileName}: ${error.code || error.name}`);
+        return false;
+    }
+}
+
 /**
  * Авторизация на eservices.rs.ge с точными селекторами (#username, #password, #btnLogin, #smsText)
  * @param {Function} onSmsRequired - callback: async (screenshotBuffer) => string (возвращает sms код)
@@ -223,7 +235,33 @@ async function openSmallBusinessDeclarations(page, expectedPeriod) {
     await page.waitForURL(DECLARATIONS_URL, { timeout: 30000 });
 
     await page.getByRole('tab', { name: 'ყოველთვიური' }).click({ timeout: 30000 });
+
+    // Список деклараций загружается отдельным AJAX-запросом уже после click.
+    // Проверка grid сразу после клика иногда видит только скрытую template-row
+    // и ошибочно сообщает, что декларации нет. Ждем завершения именно grid data.
+    const gridResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.hostname === 'decl.rs.ge' &&
+            url.pathname.endsWith('/sys_service.asmx/get_grid_s_data') &&
+            response.request().method() === 'POST' &&
+            response.status() === 200;
+    }, { timeout: 30000 });
     await page.getByRole('cell', { name: SMALL_BUSINESS_TAX_NAME }).click();
+    try {
+        await gridResponse;
+        await page.locator('#control_0_g3g').waitFor({ state: 'attached', timeout: 10000 });
+        await page.waitForFunction(() => {
+            const grid = document.querySelector('#control_0_g3g');
+            return grid && grid.classList.contains('end_out');
+        }, undefined, { timeout: 10000 });
+        // jQuery grid inserts rows immediately after resolving its data request.
+        await page.waitForTimeout(100);
+    } catch (cause) {
+        const error = new Error('RS.GE page contract changed: declaration grid did not finish loading');
+        error.code = 'RSGE_PAGE_CONTRACT_CHANGED';
+        error.cause = cause;
+        throw error;
+    }
 }
 
 async function openExistingSmallBusinessDraft(page, year, month) {
@@ -235,12 +273,9 @@ async function openExistingSmallBusinessDraft(page, year, month) {
         logger.info(`Сохраненный черновик за ${expectedPeriod} не найден.`);
         return result;
     }
-    await fs.promises.writeFile(
-        path.join(SCREENSHOTS_DIR, 'declaration_draft.png'),
-        result.screenshotBuffer
-    );
+    await saveRuntimeScreenshot('declaration_draft.png', result.screenshotBuffer);
 
-    logger.info(`Черновик за ${expectedPeriod} открыт в режиме просмотра.`);
+    logger.info(`Декларация за ${expectedPeriod} открыта в режиме просмотра (статус: ${result.status}).`);
     return result;
 }
 
@@ -251,10 +286,7 @@ async function openExistingSmallBusinessDraft(page, year, month) {
 async function createSmallBusinessDraft(page, preview) {
     await openSmallBusinessDeclarations(page, preview.period);
     const result = await writeSmallBusinessDraftPage(page, preview);
-    await fs.promises.writeFile(
-        path.join(SCREENSHOTS_DIR, 'declaration_draft_created.png'),
-        result.screenshotBuffer
-    );
+    await saveRuntimeScreenshot('declaration_draft_created.png', result.screenshotBuffer);
     logger.info(`Черновик за ${preview.period} сохранен и повторно проверен.`);
     return result;
 }

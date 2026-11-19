@@ -71,6 +71,17 @@ test('reads a visible saved declaration and its numeric fields', async () => {
     });
 });
 
+test('recognizes the current Georgian sent status used by RS.GE', async () => {
+    await withFixture('declarations-sent.html', async (page) => {
+        const result = await readSmallBusinessDraftPage(page, '10.2026');
+        assert.equal(result.exists, true);
+        assert.equal(result.status, 'Sent');
+        assert.equal(result.fields[15], 71617.04);
+        assert.equal(result.fields[20], 7277.76);
+        assert.equal(result.fields[26], 72.78);
+    });
+});
+
 test('creates a saved draft without clicking the final submit control', async () => {
     await withFixture('declarations-new.html', async (page) => {
         const preview = {

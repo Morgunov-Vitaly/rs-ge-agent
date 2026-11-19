@@ -51,10 +51,14 @@ async function readSmallBusinessDraftPage(page, expectedPeriod, options = {}) {
     const draftRow = viewButtons.first().locator('xpath=ancestor::tr[count(td) >= 5][1]');
     const rowCells = await draftRow.locator('td').allInnerTexts();
     const normalizedCells = rowCells.map((value) => value.trim()).filter(Boolean);
-    const rawStatus = normalizedCells.find((value) => /შენახულ|გაგზავნილ|sent/i.test(value)) || '';
+    const rawStatus = normalizedCells.find((value) => (
+        /შენახულ|გაგზავნილ|გადაგზავნილ|sent/i.test(value)
+    )) || '';
     const status = rawStatus.includes('შენახული')
         ? 'Сохранен'
-        : (rawStatus.includes('გაგზავნილი') ? 'Sent' : (rawStatus || 'Неизвестен'));
+        : (/გაგზავნილ|გადაგზავნილ|sent/i.test(rawStatus)
+            ? 'Sent'
+            : (rawStatus || 'Неизвестен'));
 
     await viewButtons.first().click();
     const draftWindow = page.locator('.window_panel').filter({

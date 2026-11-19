@@ -292,8 +292,9 @@ async function runFillFlow(ctx) {
             ? `Оплата по таблице: ${summary.paymentDate}`
             : 'Оплата по таблице не отмечена';
 
+        const declarationLabel = draft.status === 'Sent' ? 'Декларация' : 'Черновик';
         const caption =
-            `Черновик за ${String(reportMonth).padStart(2, '0')}.${reportYear}\n` +
+            `${declarationLabel} за ${String(reportMonth).padStart(2, '0')}.${reportYear}\n` +
             `Статус RS.GE: ${draft.status || 'сохранен'}\n` +
             `Статус таблицы: ${summary.status}\n` +
             `${paymentInfo}\n` +
