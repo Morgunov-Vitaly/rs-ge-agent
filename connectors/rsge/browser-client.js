@@ -7,6 +7,9 @@ function createRsGeBrowserClient(page) {
         getPaymentHistory: (options) => playwright.getPaymentHistory(page, options),
         openExistingSmallBusinessDraft: (year, month) => (
             playwright.openExistingSmallBusinessDraft(page, year, month)
+        ),
+        createSmallBusinessDraft: (preview, options) => (
+            playwright.createSmallBusinessDraft(page, preview, options)
         )
     });
 }

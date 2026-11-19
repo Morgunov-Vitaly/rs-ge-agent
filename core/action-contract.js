@@ -65,7 +65,7 @@ async function executeModuleAction(manifest, actionId, input, execution = {}) {
         }
     }
 
-    return action.handler(input);
+    return action.handler(input, Object.freeze({ ...execution }));
 }
 
 module.exports = {

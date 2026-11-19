@@ -8,6 +8,7 @@ const {
     readSmallBusinessDraftPage,
     readPayerCardTable
 } = require('../connectors/rsge/page-readers');
+const { writeSmallBusinessDraftPage } = require('../connectors/rsge/page-writers');
 const { launchBrowser, parsePayerCardRows } = require('../services/playwright');
 
 const FIXTURES_DIR = path.join(__dirname, 'fixtures', 'rsge');
@@ -67,6 +68,58 @@ test('reads a visible saved declaration and its numeric fields', async () => {
         assert.equal(result.fields[26], 20.01);
         assert.ok(Buffer.isBuffer(result.screenshotBuffer));
         assert.ok(result.screenshotBuffer.length > 0);
+    });
+});
+
+test('creates a saved draft without clicking the final submit control', async () => {
+    await withFixture('declarations-new.html', async (page) => {
+        const preview = {
+            period: '10.2026',
+            fields: {
+                15: 12000.5,
+                16: 1,
+                17: 2000.5,
+                18: 0,
+                19: 0,
+                20: 2000.5,
+                21: 0,
+                26: 20.01
+            }
+        };
+        const result = await writeSmallBusinessDraftPage(page, preview);
+
+        assert.equal(result.exists, true);
+        assert.equal(result.status, 'Сохранен');
+        assert.equal(result.fields[20], 2000.5);
+        assert.equal(result.fields[26], 20.01);
+        assert.equal(await page.evaluate(() => window.__submitted), false);
+    });
+});
+
+test('does not save a draft when RS.GE autofill differs from preview', async () => {
+    await withFixture('declarations-new.html', async (page) => {
+        const preview = {
+            period: '10.2026',
+            fields: {
+                15: 99999,
+                16: 1,
+                17: 2000.5,
+                18: 0,
+                19: 0,
+                20: 2000.5,
+                21: 0,
+                26: 20.01
+            }
+        };
+        await assert.rejects(
+            writeSmallBusinessDraftPage(page, preview, { timeout: 200 }),
+            ({ code }) => code === 'RSGE_DRAFT_VALUES_MISMATCH'
+        );
+        assert.equal(
+            await page.locator('#control_0_g3g img[src$="view.png"]:visible').count(),
+            0
+        );
+        assert.equal(await page.evaluate(() => window.__submitted), false);
     });
 });
 

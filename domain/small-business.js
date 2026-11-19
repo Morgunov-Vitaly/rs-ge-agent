@@ -78,7 +78,9 @@ function calculateSmallBusinessTax(incomeGel, cumulativeIncomeBefore = 0, option
 
     return {
         rate,
-        taxAmount: Number((incomeGel * rate).toFixed(2)),
+        // Денежное округление half-up. Number#toFixed может дать 20.00 для
+        // 20.005 из-за двоичного представления, хотя налоговая сумма — 20.01.
+        taxAmount: Math.round((incomeGel * rate + Number.EPSILON) * 100) / 100,
         cumulativeTotal: Number(newCumulative.toFixed(2)),
         isOverLimit,
         annualLimit

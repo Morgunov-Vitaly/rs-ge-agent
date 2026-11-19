@@ -14,6 +14,7 @@ const {
     readSmallBusinessDraftPage,
     readPayerCardTable
 } = require('../connectors/rsge/page-readers');
+const { writeSmallBusinessDraftPage } = require('../connectors/rsge/page-writers');
 
 const SESSION_STORAGE_PATH = config.rsGe.sessionStoragePath;
 const SCREENSHOTS_DIR = config.rsGe.screenshotsDir;
@@ -200,9 +201,7 @@ async function loginToRsGe(onSmsRequired) {
  *   screenshotBuffer?: Buffer
  * }>}
  */
-async function openExistingSmallBusinessDraft(page, year, month) {
-    const expectedPeriod = `${String(month).padStart(2, '0')}.${year}`;
-
+async function openSmallBusinessDeclarations(page, expectedPeriod) {
     logger.info(`Открываем раздел деклараций за ${expectedPeriod}...`);
     await page.goto(MAIN_PAGE_URL, {
         waitUntil: 'domcontentloaded',
@@ -225,6 +224,11 @@ async function openExistingSmallBusinessDraft(page, year, month) {
 
     await page.getByRole('tab', { name: 'ყოველთვიური' }).click({ timeout: 30000 });
     await page.getByRole('cell', { name: SMALL_BUSINESS_TAX_NAME }).click();
+}
+
+async function openExistingSmallBusinessDraft(page, year, month) {
+    const expectedPeriod = `${String(month).padStart(2, '0')}.${year}`;
+    await openSmallBusinessDeclarations(page, expectedPeriod);
 
     const result = await readSmallBusinessDraftPage(page, expectedPeriod);
     if (!result.exists) {
@@ -237,6 +241,21 @@ async function openExistingSmallBusinessDraft(page, year, month) {
     );
 
     logger.info(`Черновик за ${expectedPeriod} открыт в режиме просмотра.`);
+    return result;
+}
+
+/**
+ * Создает и сохраняет черновик декларации. Финальная отправка декларации
+ * не входит в контракт этой функции и технически здесь не реализована.
+ */
+async function createSmallBusinessDraft(page, preview) {
+    await openSmallBusinessDeclarations(page, preview.period);
+    const result = await writeSmallBusinessDraftPage(page, preview);
+    await fs.promises.writeFile(
+        path.join(SCREENSHOTS_DIR, 'declaration_draft_created.png'),
+        result.screenshotBuffer
+    );
+    logger.info(`Черновик за ${preview.period} сохранен и повторно проверен.`);
     return result;
 }
 
@@ -447,6 +466,7 @@ async function getPaymentHistory(page, options = {}) {
 module.exports = {
     loginToRsGe,
     openExistingSmallBusinessDraft,
+    createSmallBusinessDraft,
     getPaymentHistory,
     parseRsGeDate,
     parsePaymentOrderDate,

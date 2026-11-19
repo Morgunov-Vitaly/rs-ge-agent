@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ka">
+<body>
+    <div id="control_0_m"><input class="d_value" value="10.2026"></div>
+    <button type="button" data-action="new-declaration">ახალი დეკლარაცია</button>
+    <table id="control_0_g3g">
+        <tbody>
+            <tr id="template-row" style="display: none">
+                <td>{$T.ID}</td>
+                <td>{$T.PERIOD}</td>
+                <td>{$T.STATUS_TXT}</td>
+                <td>{$T.AMOUNT}</td>
+                <td><img src="assets/view.png" alt="template view"></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <section id="draft-editor" class="window_panel" style="display: none">
+        <label>
+            <input type="checkbox" data-action="autofill">
+            ავტომატური შევსება
+        </label>
+        <input id="fixture_15" class="decl_input_tb" value="0">
+        <input id="fixture_16" class="decl_input_tb" value="0">
+        <input id="fixture_17" class="decl_input_tb" value="0">
+        <input id="fixture_18" class="decl_input_tb" value="0">
+        <input id="fixture_19" class="decl_input_tb" value="0">
+        <input id="fixture_20" class="decl_input_tb" value="0">
+        <input id="fixture_21" class="decl_input_tb" value="0">
+        <input id="fixture_26" class="decl_input_tb" value="0">
+        <button type="button" data-action="save-draft">შენახვა</button>
+        <button type="button" data-action="submit-declaration">გაგზავნა</button>
+    </section>
+
+    <script>
+        window.__submitted = false;
+        const editor = document.getElementById('draft-editor');
+        const field = (number) => document.getElementById(`fixture_${number}`);
+        const calculate = () => {
+            const income = Number(field(20).value) || 0;
+            field(17).value = income.toFixed(2);
+            field(26).value = (Math.round((income * 0.01 + Number.EPSILON) * 100) / 100).toFixed(2);
+        };
+        document.querySelector('[data-action="new-declaration"]').addEventListener('click', () => {
+            editor.style.display = 'block';
+        });
+        document.querySelector('[data-action="autofill"]').addEventListener('change', (event) => {
+            if (!event.target.checked) return;
+            field(15).value = '12000.50';
+            field(16).value = '1.00';
+            calculate();
+        });
+        field(20).addEventListener('input', calculate);
+        document.querySelector('[data-action="save-draft"]').addEventListener('click', () => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>fixture-new-declaration</td>
+                <td>10.2026</td>
+                <td>შენახული</td>
+                <td>${field(26).value}</td>
+                <td><img src="assets/view.png" alt="view declaration"></td>
+            `;
+            row.querySelector('img').addEventListener('click', () => {
+                editor.style.display = 'block';
+            });
+            document.querySelector('#control_0_g3g tbody').prepend(row);
+            editor.style.display = 'none';
+        });
+        document.querySelector('[data-action="submit-declaration"]').addEventListener('click', () => {
+            window.__submitted = true;
+        });
+    </script>
+</body>
+</html>

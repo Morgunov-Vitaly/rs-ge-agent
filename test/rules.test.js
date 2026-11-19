@@ -29,3 +29,8 @@ test('supports a 700,000 GEL profile limit where legally applicable', () => {
     assert.equal(crossingLimit.taxAmount, 900);
     assert.equal(crossingLimit.annualLimit, 700000);
 });
+
+test('rounds half-tetri tax amounts up instead of using binary toFixed rounding', () => {
+    const result = calculateSmallBusinessTax(2000.5, 10000);
+    assert.equal(result.taxAmount, 20.01);
+});
