@@ -7,7 +7,7 @@ const { executePaymentReconciliationSync } = require('../../workflows/payment-re
 
 module.exports = defineModule({
     id: 'small-business',
-    version: '0.5.1',
+    version: '0.6.0',
     name: 'Small Business Tax',
     capabilities: [
         'review-declaration',

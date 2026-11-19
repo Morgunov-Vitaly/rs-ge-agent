@@ -81,6 +81,25 @@ function desiredInsertion(payment, rowIndex, reconciledAt) {
     };
 }
 
+function sameReconciliationState(record, desired) {
+    const currentAmount = record.rsPaymentAmount === null || record.rsPaymentAmount === undefined
+        ? null
+        : Number(record.rsPaymentAmount);
+    const desiredAmount = desired.rsPaymentAmount === null || desired.rsPaymentAmount === undefined
+        ? null
+        : Number(desired.rsPaymentAmount);
+
+    return (
+        (record.recordType || '') === desired.recordType &&
+        (record.reconciliationStatus || '') === desired.reconciliationStatus &&
+        (record.rsPaymentDate || '') === desired.rsPaymentDate &&
+        (record.rsPostedDate || '') === desired.rsPostedDate &&
+        currentAmount === desiredAmount &&
+        (record.rsPaymentId || '') === desired.rsPaymentId &&
+        (record.reconciliationComment || '') === desired.reconciliationComment
+    );
+}
+
 function fingerprintPreview(records, updates, inserts) {
     const currentState = records.map((record) => ({
         rowIndex: record.rowIndex,
@@ -109,9 +128,12 @@ function fingerprintPreview(records, updates, inserts) {
 function buildPaymentReconciliationPreview({ records, reconciliation, reconciledAt = formatReconciledAt() }) {
     const recordByRow = new Map(records.map((record) => [record.rowIndex, record]));
     const updates = reconciliation.results.flatMap((item) => (
-        item.rowIndexes
-            .filter((rowIndex) => recordByRow.has(rowIndex))
-            .map((rowIndex) => desiredUpdate(item, rowIndex, reconciledAt))
+        item.rowIndexes.flatMap((rowIndex) => {
+            const record = recordByRow.get(rowIndex);
+            if (!record) return [];
+            const desired = desiredUpdate(item, rowIndex, reconciledAt);
+            return sameReconciliationState(record, desired) ? [] : [desired];
+        })
     ));
 
     const existingPortalPaymentIds = new Set(
@@ -248,5 +270,6 @@ module.exports = {
     createPortalPaymentId,
     executePaymentReconciliationSync,
     formatPaymentReconciliationPreview,
-    formatReconciledAt
+    formatReconciledAt,
+    sameReconciliationState
 };

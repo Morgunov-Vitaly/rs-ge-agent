@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-test('/check completes one read-only period verification after SMS', async () => {
+test('/check alias completes the unified read-only account verification after SMS', async () => {
     process.env.TELEGRAM_BOT_TOKEN = '999999:test-token';
     process.env.TELEGRAM_CHAT_ID = '123456';
 
@@ -104,7 +104,10 @@ test('/check completes one read-only period verification after SMS', async () =>
             String(payload?.text || '').includes(`Период ${String(reportMonth).padStart(2, '0')}.${reportYear} закрыт`)
         )));
         assert.ok(telegramCalls.some(({ payload }) => (
-            String(payload?.text || '').includes('Данные на RS.GE и в Google Sheets не изменялись')
+            String(payload?.text || '').includes('История оплат')
+        )));
+        assert.ok(telegramCalls.some(({ payload }) => (
+            String(payload?.text || '').includes('Проверка выполнена в режиме чтения')
         )));
     } finally {
         Object.assign(playwright, originals);

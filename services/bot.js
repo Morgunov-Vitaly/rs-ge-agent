@@ -19,12 +19,12 @@ const { config, assertConfig } = require('../config');
 const { createGoogleSheetsIncomeRepository } = require('../connectors/google-sheets/income-repository');
 const { createRsGeBrowserClient } = require('../connectors/rsge/browser-client');
 const { executePaymentReconciliation } = require('../workflows/payment-reconciliation');
+const { executeAccountCheck } = require('../workflows/account-check');
 const {
     buildPaymentReconciliationPreview,
     formatPaymentReconciliationPreview
 } = require('../workflows/payment-reconciliation-sync');
 const { executeDeclarationReview } = require('../workflows/declaration-review');
-const { executePeriodCheck } = require('../workflows/period-check');
 const {
     buildDeclarationDraftPreview,
     getDeclarationPreviewFingerprint,
@@ -435,29 +435,45 @@ async function replyLongText(ctx, text) {
 }
 
 async function runPaymentsFlow(ctx) {
-    let result;
+    let loginResult;
 
     try {
-        result = await playwright.loginToRsGe((screenshotBuffer) => requestSmsCode(ctx, screenshotBuffer));
+        const { year, month } = getPreviousReportPeriod();
+        loginResult = await playwright.loginToRsGe(
+            (screenshotBuffer) => requestSmsCode(ctx, screenshotBuffer)
+        );
 
-        await ctx.reply('🎉 Вход в личный кабинет rs.ge выполнен. Читаю личную карточку...');
-        const { report } = await executePaymentReconciliation({
+        await ctx.reply(
+            `🎉 Вход выполнен. Проверяю декларацию, оплату и задолженность за ` +
+            `${String(month).padStart(2, '0')}.${year}, затем сверяю историю платежей...`
+        );
+        const result = await executeAccountCheck({
             recordsRepository,
-            rsGeClient: createRsGeBrowserClient(result.page)
+            rsGeClient: createRsGeBrowserClient(loginResult.page),
+            year,
+            month
         });
 
-        await replyLongText(ctx, report);
+        await replyLongText(ctx, result.report);
+        if (result.needsReconciliation) {
+            await ctx.reply(
+                'Записать найденные расхождения в отдельные колонки Google Sheets?',
+                Markup.inlineKeyboard([
+                    [Markup.button.callback('🧩 Записать расхождения', 'offer_reconcile')]
+                ])
+            );
+        }
     } catch (err) {
         logger.error('Ошибка при запуске /payments:', err);
         if (err.code !== 'USER_CANCELLED') {
-            await ctx.reply(`❌ Ошибка сверки оплат: ${err.message}`);
+            await ctx.reply(`❌ Ошибка проверки налогового статуса: ${err.message}`);
         }
     } finally {
         if (sessionState.smsChatId === ctx.chat.id) {
             clearSmsWaitState();
         }
-        if (result && result.browser) {
-            await result.browser.close().catch((err) => {
+        if (loginResult?.browser) {
+            await loginResult.browser.close().catch((err) => {
                 logger.warn('Не удалось закрыть браузер:', err.message);
             });
         }
@@ -475,45 +491,6 @@ function getPreviousReportPeriod(now = new Date()) {
         year -= 1;
     }
     return { year, month };
-}
-
-async function runPeriodCheckFlow(ctx) {
-    let loginResult;
-
-    try {
-        const { year, month } = getPreviousReportPeriod();
-        loginResult = await playwright.loginToRsGe(
-            (screenshotBuffer) => requestSmsCode(ctx, screenshotBuffer)
-        );
-        await ctx.reply(
-            `🎉 Вход выполнен. Проверяю закрытие периода ${String(month).padStart(2, '0')}.${year}...`
-        );
-
-        const result = await executePeriodCheck({
-            recordsRepository,
-            rsGeClient: createRsGeBrowserClient(loginResult.page),
-            year,
-            month
-        });
-        await replyLongText(ctx, result.report);
-    } catch (err) {
-        logger.error('Ошибка при запуске /check:', err);
-        if (err.code !== 'USER_CANCELLED') {
-            await ctx.reply(`❌ Ошибка проверки периода: ${err.message}`);
-        }
-    } finally {
-        if (sessionState.smsChatId === ctx.chat.id) {
-            clearSmsWaitState();
-        }
-        if (loginResult?.browser) {
-            await loginResult.browser.close().catch((err) => {
-                logger.warn('Не удалось закрыть браузер:', err.message);
-            });
-        }
-        sessionState.fillInProgress = false;
-        sessionState.fillChatId = null;
-        sessionState.activeOperation = null;
-    }
 }
 
 async function runReconciliationFlow(ctx) {
@@ -536,6 +513,15 @@ async function runReconciliationFlow(ctx) {
             records: reconciliationResult.records,
             reconciliation: reconciliationResult.reconciliation
         });
+        if (
+            preview.summary.rowsToUpdate === 0 &&
+            preview.summary.portalRowsToInsert === 0
+        ) {
+            await ctx.reply(
+                '✅ Данные сверки в Google Sheets уже актуальны. Повторная запись не требуется.'
+            );
+            return;
+        }
         let result;
         for (let refreshCount = 0; ; refreshCount += 1) {
             await requestReconciliationConfirmation(ctx, preview);
@@ -601,6 +587,26 @@ async function runReconciliationFlow(ctx) {
     }
 }
 
+async function startReconciliationFlow(ctx) {
+    if (sessionState.fillInProgress) {
+        return ctx.reply('⏳ Операция с RS.GE уже запущена. Завершите её или нажмите /cancel.');
+    }
+
+    sessionState.fillInProgress = true;
+    sessionState.fillChatId = ctx.chat.id;
+    sessionState.activeOperation = 'reconcile';
+    await ctx.reply(
+        '🧩 Готовлю расхождения для записи. Сначала будет показан preview; ' +
+        'до подтверждения Google Sheets не изменяется.'
+    );
+
+    setImmediate(() => {
+        runReconciliationFlow(ctx).catch((err) => {
+            logger.error('Фоновый процесс /reconcile завершился с ошибкой:', err);
+        });
+    });
+}
+
 // Middleware: доступ только для владельца бота
 bot.use(async (ctx, next) => {
     if (ALLOWED_CHAT_ID && ctx.chat && ctx.chat.id !== ALLOWED_CHAT_ID) {
@@ -623,8 +629,7 @@ function getMainMenu() {
     return Markup.keyboard([
         ['➕ Добавить доход', '📊 Статус за месяц'],
         ['📝 Подготовить декларацию', '💳 Оплатить налог'],
-        ['✅ Проверить период', '🔍 Проверить оплаты'],
-        ['🧩 Записать сверку'],
+        ['🔍 Проверить оплаты'],
         ['❓ Помощь']
     ]).resize();
 }
@@ -650,9 +655,7 @@ bot.start(async (ctx) => {
         `• 📊 *Статус за месяц* — сводка из Google Таблицы, налог 1% и сроки\n` +
         `• 📝 *Подготовить декларацию* — preview и подтверждаемое сохранение черновика на rs.ge\n` +
         `• 💳 *Оплатить налог* — ссылка и реквизиты Казначейства\n` +
-        `• ✅ *Проверить период* — единая read-only проверка декларации, оплаты и задолженности\n` +
-        `• 🔍 *Проверить оплаты* — сверка дат и сумм с личной карточкой RS.GE\n\n` +
-        `• 🧩 *Записать сверку* — preview и подтверждаемая запись данных RS.GE в таблицу\n\n` +
+        `• 🔍 *Проверить оплаты* — единая проверка декларации, платежей, задолженности и истории RS.GE\n\n` +
         `💡 Также можно быстро отправить строку вида: \`15.10 2500 USD\``;
 
     await ctx.replyWithMarkdown(welcome, getMainMenu());
@@ -700,12 +703,9 @@ bot.hears(['❓ Помощь', '/help'], async (ctx) => {
         `Бот входит на rs.ge, показывает preview и только после отдельного подтверждения сохраняет черновик. Финальная отправка не выполняется.\n\n` +
         `4. *💳 Оплатить налог (/pay)*\n` +
         `Ссылка на официальный шлюз rs.ge и реквизиты Казначейства (101001000).\n\n` +
-        `5. *✅ Проверить период (/check)*\n` +
-        `Одним входом проверяет отправку декларации, суммы, фактическую оплату и задолженность. Это только чтение: данные не изменяются.\n\n` +
-        `6. *🔍 Проверить оплаты (/payments)*\n` +
-        `Читает личную карточку на RS.GE и сверяет даты и фактические суммы платежей с Google Таблицей. Таблица автоматически не изменяется.\n\n` +
-        `7. *🧩 Записать сверку (/reconcile)*\n` +
-        `Сначала показывает preview. После отдельного подтверждения добавляет колонки RS.GE и несопоставленные платежи. Доход и налог не изменяются.`;
+        `5. *🔍 Проверить оплаты (/payments)*\n` +
+        `Одним входом проверяет декларацию за последний период, фактическую оплату, задолженность и всю историю платежей. ` +
+        `Если появились новые расхождения, бот предложит записать их в таблицу после отдельного подтверждения.`;
 
     await ctx.replyWithMarkdown(helpText);
 });
@@ -848,8 +848,14 @@ bot.action(/^reconcile_cancel:(.+)$/, async (ctx) => {
     }
 });
 
-// /payments или кнопка "🔍 Проверить оплаты"
-bot.hears(['🔍 Проверить оплаты', '/payments'], async (ctx) => {
+bot.action('offer_reconcile', async (ctx) => {
+    await ctx.answerCbQuery('Готовлю preview расхождений');
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => undefined);
+    await startReconciliationFlow(ctx);
+});
+
+// Единая read-only проверка. Старые названия и /check сохранены как alias.
+bot.hears(['🔍 Проверить оплаты', '✅ Проверить период', '/payments', '/check'], async (ctx) => {
     if (sessionState.fillInProgress) {
         return ctx.reply('⏳ Операция с RS.GE уже запущена. Отправьте SMS-код или нажмите /cancel.');
     }
@@ -858,7 +864,7 @@ bot.hears(['🔍 Проверить оплаты', '/payments'], async (ctx) => 
     sessionState.fillChatId = ctx.chat.id;
     sessionState.activeOperation = 'payments';
     await ctx.reply(
-        '🔍 Сверяю Google Таблицу с личной карточкой RS.GE. ' +
+        '🔍 Проверяю декларацию, оплату, задолженность и историю платежей RS.GE. ' +
         'Это только чтение: данные на портале и в таблице не изменятся.'
     );
 
@@ -870,47 +876,9 @@ bot.hears(['🔍 Проверить оплаты', '/payments'], async (ctx) => 
     });
 });
 
-// /check или единая проверка закрытия прошлого отчетного периода.
-bot.hears(['✅ Проверить период', '/check'], async (ctx) => {
-    if (sessionState.fillInProgress) {
-        return ctx.reply('⏳ Операция с RS.GE уже запущена. Отправьте SMS-код или нажмите /cancel.');
-    }
-
-    sessionState.fillInProgress = true;
-    sessionState.fillChatId = ctx.chat.id;
-    sessionState.activeOperation = 'check';
-    await ctx.reply(
-        '✅ Проверяю декларацию, оплату и личную карточку RS.GE. ' +
-        'Это только чтение: данные на портале и в таблице не изменятся.'
-    );
-
-    // Не await: Telegram polling должен продолжать принимать SMS-код.
-    setImmediate(() => {
-        runPeriodCheckFlow(ctx).catch((err) => {
-            logger.error('Фоновый процесс /check завершился с ошибкой:', err);
-        });
-    });
-});
-
-// /reconcile или подтверждаемая запись результатов сверки в Google Sheets.
+// Скрытая advanced-команда; обычному пользователю бот предлагает ее только при необходимости.
 bot.hears(['🧩 Записать сверку', '/reconcile'], async (ctx) => {
-    if (sessionState.fillInProgress) {
-        return ctx.reply('⏳ Операция с RS.GE уже запущена. Завершите её или нажмите /cancel.');
-    }
-
-    sessionState.fillInProgress = true;
-    sessionState.fillChatId = ctx.chat.id;
-    sessionState.activeOperation = 'reconcile';
-    await ctx.reply(
-        '🧩 Готовлю сверку для записи. Сначала будет показан preview; ' +
-        'до подтверждения Google Sheets не изменяется.'
-    );
-
-    setImmediate(() => {
-        runReconciliationFlow(ctx).catch((err) => {
-            logger.error('Фоновый процесс /reconcile завершился с ошибкой:', err);
-        });
-    });
+    await startReconciliationFlow(ctx);
 });
 
 // Быстрый регулярный формат: "10.11 2500 USD", "5000 GEL"

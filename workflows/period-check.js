@@ -167,6 +167,7 @@ async function executePeriodCheck({
             declarationComparison,
             portalHistory,
             reconciliation,
+            records,
             periodPayments,
             paymentSatisfied,
             debtClear,

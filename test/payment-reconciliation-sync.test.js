@@ -109,6 +109,31 @@ test('does not propose a duplicate row for an already imported portal payment', 
     assert.equal(preview.summary.existingPortalRows, 1);
 });
 
+test('does not rewrite reconciliation fields that are already current', () => {
+    const data = scenario();
+    const firstPreview = buildPaymentReconciliationPreview({
+        records: data.records,
+        reconciliation: data.reconciliation,
+        reconciledAt: '19.11.2026 13:00:00'
+    });
+    const updatedRecords = data.records.map((record) => {
+        const update = firstPreview.plan.updates.find(({ rowIndex }) => rowIndex === record.rowIndex);
+        return update ? { ...record, ...update } : record;
+    });
+    updatedRecords.push(...firstPreview.plan.inserts);
+    const nextReconciliation = payments.reconcilePayments(
+        updatedRecords,
+        data.portalHistory.payments
+    );
+    const nextPreview = buildPaymentReconciliationPreview({
+        records: updatedRecords,
+        reconciliation: nextReconciliation
+    });
+
+    assert.equal(nextPreview.summary.rowsToUpdate, 0);
+    assert.equal(nextPreview.summary.portalRowsToInsert, 0);
+});
+
 test('writes a reconciliation plan only through confirmed DATA_WRITE action', async () => {
     const data = scenario();
     const preview = buildPaymentReconciliationPreview({
