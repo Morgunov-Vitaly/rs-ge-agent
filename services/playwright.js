@@ -390,6 +390,15 @@ function parsePayerCardRows(rows) {
     };
 }
 
+async function triggerPayerCardRefresh(page) {
+    await page.evaluate(() => {
+        if (typeof window.updateGrdPayerCard !== 'function') {
+            throw new Error('RS.GE payer-card refresh function is unavailable');
+        }
+        window.updateGrdPayerCard();
+    });
+}
+
 /**
  * Читает личную карточку налогоплательщика за указанные календарные годы.
  * Функция только читает данные и ничего не изменяет на RS.GE.
@@ -451,7 +460,10 @@ async function getPaymentHistory(page, options = {}) {
                 ),
                 { timeout: 30000 }
             ),
-            page.locator('[onclick="updateGrdPayerCard()"], [onclick="updateGrdPayerCard();"]').click({ force: true })
+            // The legacy page can render a hidden duplicate of the visual button.
+            // Invoke its own read-only refresh function instead of clicking a
+            // presentation element whose visibility changes between layouts.
+            triggerPayerCardRefresh(page)
         ]);
         await page.waitForTimeout(500);
 
@@ -503,6 +515,7 @@ module.exports = {
     parseRsGeDate,
     parsePaymentOrderDate,
     parsePayerCardRows,
+    triggerPayerCardRefresh,
     launchBrowser,
     createBrowserContext
 };

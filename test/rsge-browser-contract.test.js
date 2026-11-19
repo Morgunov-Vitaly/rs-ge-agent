@@ -9,7 +9,11 @@ const {
     readPayerCardTable
 } = require('../connectors/rsge/page-readers');
 const { writeSmallBusinessDraftPage } = require('../connectors/rsge/page-writers');
-const { launchBrowser, parsePayerCardRows } = require('../services/playwright');
+const {
+    launchBrowser,
+    parsePayerCardRows,
+    triggerPayerCardRefresh
+} = require('../services/playwright');
 
 const FIXTURES_DIR = path.join(__dirname, 'fixtures', 'rsge');
 let browser;
@@ -164,6 +168,9 @@ test('fails safely on an unexpected period or unknown declaration DOM', async ()
 
 test('reads and parses sanitized payer-card rows', async () => {
     await withFixture('payer-card.html', async (page) => {
+        await triggerPayerCardRefresh(page);
+        assert.equal(await page.locator('body').getAttribute('data-refresh-triggered'), 'yes');
+
         const rows = await readPayerCardTable(page);
         const parsed = parsePayerCardRows(rows);
 

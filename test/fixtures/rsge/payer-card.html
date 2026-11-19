@@ -1,6 +1,11 @@
 <!doctype html>
 <html lang="ka">
 <body>
+    <div
+        class="rsButton"
+        onclick="updateGrdPayerCard()"
+        style="display: none"
+    >Hidden legacy refresh control</div>
     <table id="rsGrid_grdPayerCard">
         <tbody>
             <tr>
@@ -21,5 +26,10 @@
             </tr>
         </tbody>
     </table>
+    <script>
+        window.updateGrdPayerCard = () => {
+            document.body.dataset.refreshTriggered = 'yes';
+        };
+    </script>
 </body>
 </html>
