@@ -10,6 +10,8 @@ const {
 } = require('../connectors/rsge/page-readers');
 const { writeSmallBusinessDraftPage } = require('../connectors/rsge/page-writers');
 const {
+    ACCOUNTING_URL,
+    acknowledgePayerCardNotice,
     launchBrowser,
     parsePayerCardRows,
     refreshPayerCardData
@@ -17,6 +19,11 @@ const {
 
 const FIXTURES_DIR = path.join(__dirname, 'fixtures', 'rsge');
 let browser;
+
+test('opens the payer-card tab directly instead of relying on a legacy tab click', () => {
+    assert.match(ACCOUNTING_URL, /[?&]tab=tabPayerCard(?:&|$)/);
+    assert.doesNotMatch(ACCOUNTING_URL, /tabComparisoAct/);
+});
 
 async function withFixture(name, callback) {
     const page = await browser.newPage();
@@ -168,6 +175,9 @@ test('fails safely on an unexpected period or unknown declaration DOM', async ()
 
 test('reads and parses sanitized payer-card rows', async () => {
     await withFixture('payer-card.html', async (page) => {
+        assert.equal(await acknowledgePayerCardNotice(page), true);
+        assert.equal(await page.locator('#rsAlert').isVisible(), false);
+
         await page.route('**/WebServices/hsAccounting.ashx/GetPayerCards', (route) => (
             route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
         ));

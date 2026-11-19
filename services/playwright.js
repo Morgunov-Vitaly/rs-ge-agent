@@ -20,7 +20,7 @@ const SESSION_STORAGE_PATH = config.rsGe.sessionStoragePath;
 const SCREENSHOTS_DIR = config.rsGe.screenshotsDir;
 const MAIN_PAGE_URL = 'https://eservices.rs.ge/MainPage.aspx';
 const DECLARATIONS_URL = 'https://decl.rs.ge/decls.aspx';
-const ACCOUNTING_URL = 'https://eservices.rs.ge/Accounting.aspx?tab=tabComparisoAct';
+const ACCOUNTING_URL = 'https://eservices.rs.ge/Accounting.aspx?tab=tabPayerCard';
 const SMALL_BUSINESS_TAX_NAME = 'მცირე ბიზნესის საშემოსავლო გადასახადი';
 const RS_MONTHS = {
     იან: 1,
@@ -421,6 +421,23 @@ function hasPayerCardData(parsed) {
     return Boolean(parsed.balance) || parsed.payments.length > 0 || parsed.charges.length > 0;
 }
 
+async function acknowledgePayerCardNotice(page) {
+    const alert = page.locator('#rsAlert');
+    if (!await alert.isVisible().catch(() => false)) return false;
+
+    const alertText = (await alert.innerText()).replace(/\s+/g, ' ').trim();
+    const isInformationNotice = alertText.includes('სერვისით სარგებლობისას ინფორმაციას იღებთ') &&
+        alertText.includes('გავეცანი');
+    if (!isInformationNotice) {
+        throw new Error(`RS.GE не смог открыть личную карточку: ${alertText}`);
+    }
+
+    await alert.getByRole('button', { name: 'გავეცანი', exact: true }).click();
+    await alert.waitFor({ state: 'hidden', timeout: 10000 });
+    logger.info('Информационное уведомление личной карточки RS.GE подтверждено.');
+    return true;
+}
+
 /**
  * Читает личную карточку налогоплательщика за указанные календарные годы.
  * Функция только читает данные и ничего не изменяет на RS.GE.
@@ -455,8 +472,8 @@ async function getPaymentHistory(page, options = {}) {
         undefined,
         { timeout: 30000 }
     );
-    await page.locator('#tabPayerCard').click({ timeout: 30000 });
-    await page.waitForTimeout(500);
+    await page.locator('#tabPayerCard.tab_active').waitFor({ state: 'visible', timeout: 30000 });
+    await acknowledgePayerCardNotice(page);
     await page.locator('#drpPayerCardType select').waitFor({ state: 'attached', timeout: 30000 });
     await page.locator('#drpPayerCardType select').selectOption('2', { force: true });
     await page.locator('#drpPayerCardCategory select').selectOption('0', { force: true });
@@ -529,6 +546,8 @@ async function getPaymentHistory(page, options = {}) {
 }
 
 module.exports = {
+    ACCOUNTING_URL,
+    acknowledgePayerCardNotice,
     loginToRsGe,
     openExistingSmallBusinessDraft,
     createSmallBusinessDraft,
