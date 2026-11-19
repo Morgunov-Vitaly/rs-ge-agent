@@ -170,6 +170,11 @@ test('reads and parses sanitized payer-card rows', async () => {
     await withFixture('payer-card.html', async (page) => {
         await triggerPayerCardRefresh(page);
         assert.equal(await page.locator('body').getAttribute('data-refresh-triggered'), 'yes');
+        await page.locator('#rsGrid_grdPayerCard select.rsGridMaxRows').selectOption(
+            '300',
+            { force: true }
+        );
+        assert.equal(await page.locator('body').getAttribute('data-page-size'), '300');
 
         const rows = await readPayerCardTable(page);
         const parsed = parsePayerCardRows(rows);

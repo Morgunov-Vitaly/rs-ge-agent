@@ -477,7 +477,10 @@ async function getPaymentHistory(page, options = {}) {
         if (await pageSize.count()) {
             const gridText = await page.locator('#rsGrid_grdPayerCard').innerText();
             const totalRows = Number(gridText.match(/(\d+)\s*ჩანაწერი/)?.[1] || 0);
-            await pageSize.selectOption('300');
+            // RS.GE hides the native select behind a custom pager widget.
+            // force still dispatches the native input/change events expected by
+            // the grid while avoiding a click on the hidden presentation control.
+            await pageSize.selectOption('300', { force: true });
             if (totalRows > 10) {
                 await page.waitForFunction(
                     ({ selector, expectedRows }) => (

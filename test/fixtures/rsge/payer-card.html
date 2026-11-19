@@ -7,6 +7,17 @@
         style="display: none"
     >Hidden legacy refresh control</div>
     <table id="rsGrid_grdPayerCard">
+        <caption>3 ჩანაწერი</caption>
+        <thead>
+            <tr>
+                <th colspan="20">
+                    <select class="rsGridMaxRows" style="display: none">
+                        <option value="10">10</option>
+                        <option value="300">300</option>
+                    </select>
+                </th>
+            </tr>
+        </thead>
         <tbody>
             <tr>
                 <td>18-ნოე-2026</td><td>60-სხვა</td>
@@ -30,6 +41,9 @@
         window.updateGrdPayerCard = () => {
             document.body.dataset.refreshTriggered = 'yes';
         };
+        document.querySelector('.rsGridMaxRows').addEventListener('change', (event) => {
+            document.body.dataset.pageSize = event.target.value;
+        });
     </script>
 </body>
 </html>
