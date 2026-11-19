@@ -8,4 +8,5 @@ logs/
 screenshots/
 output/
 test-results/
+.playwright-cli/
 *.png

@@ -13,6 +13,7 @@ const SOURCE_DIRECTORIES = [
     'scripts',
     'services',
     'test',
+    'web',
     'workflows'
 ];
 

@@ -12,6 +12,11 @@ function parsePositiveNumber(value, fallback) {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function parsePort(value, fallback) {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 && parsed <= 65535 ? parsed : fallback;
+}
+
 function parseBoolean(value, fallback = false) {
     if (value === undefined || value === null || value === '') return fallback;
     return /^(?:1|true|yes|on)$/i.test(String(value).trim());
@@ -27,8 +32,22 @@ function loadConfig(env = process.env) {
 
     return Object.freeze({
         telegram: Object.freeze({
+            enabled: parseBoolean(env.TELEGRAM_ENABLED, true),
             token: env.TELEGRAM_BOT_TOKEN || '',
             allowedChatId: parseChatId(env.TELEGRAM_CHAT_ID)
+        }),
+        web: Object.freeze({
+            enabled: parseBoolean(env.WEB_ENABLED, false),
+            host: env.WEB_HOST || '0.0.0.0',
+            port: parsePort(env.WEB_PORT, 8080),
+            username: env.WEB_USERNAME || '',
+            passwordHash: env.WEB_PASSWORD_HASH || '',
+            sessionSecret: env.WEB_SESSION_SECRET || '',
+            sessionTtlMinutes: parsePositiveNumber(env.WEB_SESSION_TTL_MINUTES, 30),
+            secureCookies: parseBoolean(
+                env.WEB_COOKIE_SECURE,
+                String(env.NODE_ENV || '').toLowerCase() === 'production'
+            )
         }),
         rsGe: Object.freeze({
             username: env.RS_USERNAME || '',
@@ -67,6 +86,15 @@ function assertConfig(config, scopes) {
 
     if (requested.has('telegram') && !config.telegram.token) {
         missing.push('TELEGRAM_BOT_TOKEN');
+    }
+    if (requested.has('web')) {
+        if (!config.web.username) missing.push('WEB_USERNAME');
+        if (!/^scrypt\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$/.test(config.web.passwordHash)) {
+            missing.push('WEB_PASSWORD_HASH (создайте через npm run web:password)');
+        }
+        if (!config.web.sessionSecret || config.web.sessionSecret.length < 32) {
+            missing.push('WEB_SESSION_SECRET (минимум 32 символа)');
+        }
     }
     if (requested.has('rsge')) {
         if (!config.rsGe.username) missing.push('RS_USERNAME');

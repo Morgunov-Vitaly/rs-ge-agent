@@ -35,8 +35,11 @@ test('configuration is structured and validated by scope', () => {
     assert.equal(config.runtime.retention.logMaxSizeBytes, 10 * 1024 * 1024);
     assert.equal(config.runtime.retention.screenshotTtlHours, 24);
     assert.equal(config.rsGe.enableSubmission, false);
+    assert.equal(config.web.enabled, false);
+    assert.equal(config.telegram.enabled, true);
     assert.doesNotThrow(() => assertConfig(config, ['telegram', 'google']));
     assert.doesNotThrow(() => assertConfig(config, ['submission']));
+    assert.throws(() => assertConfig(config, ['web']), /WEB_USERNAME/);
     assert.throws(() => assertConfig(config, ['rsge']), /RS_USERNAME, RS_PASSWORD/);
 
     const unsafeSubmission = loadConfig({ RSGE_ENABLE_SUBMISSION: 'true' });
@@ -49,6 +52,16 @@ test('configuration is structured and validated by scope', () => {
         RSGE_EVIDENCE_KEY: Buffer.alloc(32, 1).toString('base64')
     });
     assert.doesNotThrow(() => assertConfig(safeSubmission, ['submission']));
+
+    const safeWeb = loadConfig({
+        WEB_ENABLED: 'true',
+        WEB_USERNAME: 'owner',
+        WEB_PASSWORD_HASH: 'scrypt$salt$hash',
+        WEB_SESSION_SECRET: 'a'.repeat(32),
+        WEB_COOKIE_SECURE: 'false'
+    });
+    assert.doesNotThrow(() => assertConfig(safeWeb, ['web']));
+    assert.equal(safeWeb.web.secureCookies, false);
 });
 
 test('module contract rejects unsafe or incomplete actions', () => {

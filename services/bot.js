@@ -37,6 +37,7 @@ const {
 } = require('../workflows/declaration-submit');
 const { executeModuleAction } = require('../core/action-contract');
 const smallBusinessModule = require('../modules/small-business/manifest');
+const { getPreviousReportPeriod } = require('../domain/reporting-period');
 
 assertConfig(config, ['telegram', 'submission']);
 const BOT_TOKEN = config.telegram.token;
@@ -694,16 +695,6 @@ async function runPaymentsFlow(ctx) {
         sessionState.fillChatId = null;
         sessionState.activeOperation = null;
     }
-}
-
-function getPreviousReportPeriod(now = new Date()) {
-    let year = now.getFullYear();
-    let month = now.getMonth();
-    if (month < 1) {
-        month = 12;
-        year -= 1;
-    }
-    return { year, month };
 }
 
 async function runReconciliationFlow(ctx) {

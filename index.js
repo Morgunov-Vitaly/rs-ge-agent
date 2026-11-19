@@ -9,14 +9,17 @@
 
 require('dotenv').config();
 const logger = require('./services/logger');
-const { bot } = require('./services/bot');
 const sheets = require('./services/sheets');
 const {
     runRetentionCleanup,
     scheduleRetentionCleanup
 } = require('./infrastructure/retention-manager');
+const { config, assertConfig } = require('./config');
+const { startWebServer } = require('./web/server');
 
 let retentionTimer;
+let webRuntime;
+let bot;
 
 function formatCleanupResult(result) {
     return {
@@ -27,6 +30,11 @@ function formatCleanupResult(result) {
 }
 
 async function main() {
+    if (config.telegram.enabled) assertConfig(config, ['telegram']);
+    if (config.web.enabled) assertConfig(config, ['web']);
+    if (!config.telegram.enabled && !config.web.enabled) {
+        throw new Error('Включите TELEGRAM_ENABLED или WEB_ENABLED');
+    }
     logger.info('=== Запуск RS.GE Tax Agent ===');
 
     try {
@@ -55,25 +63,35 @@ async function main() {
         logger.error('Предупреждение по Google Таблице:', err.message);
     }
 
-    // Запускаем бота
-    logger.info('Запуск Telegram-бота...');
-    bot.launch()
-        .then(() => {
-            logger.info('✓ Telegram-бот успешно запущен и слушает команды!');
-        })
-        .catch((err) => {
-            logger.error('Ошибка запуска бота:', err);
-        });
+    if (config.telegram.enabled) {
+        ({ bot } = require('./services/bot'));
+        logger.info('Запуск Telegram-бота...');
+        bot.launch()
+            .then(() => logger.info('✓ Telegram-бот успешно запущен и слушает команды!'))
+            .catch((err) => logger.error('Ошибка запуска бота:', err));
+    }
 
-    const stop = (signal) => {
+    if (config.web.enabled) {
+        webRuntime = await startWebServer({ appConfig: config });
+        logger.info(`✓ Web-интерфейс запущен на ${config.web.host}:${config.web.port}`);
+    } else {
+        logger.info('Web-интерфейс выключен (WEB_ENABLED=false).');
+    }
+
+    const stop = async (signal) => {
         logger.info(`Остановка (${signal})...`);
         if (retentionTimer) clearInterval(retentionTimer);
-        bot.stop(signal);
+        if (bot) bot.stop(signal);
+        if (webRuntime) {
+            await webRuntime.close().catch((error) => {
+                logger.warn('Не удалось штатно остановить Web-интерфейс:', error.message);
+            });
+        }
         process.exit(0);
     };
 
-    process.once('SIGINT', () => stop('SIGINT'));
-    process.once('SIGTERM', () => stop('SIGTERM'));
+    process.once('SIGINT', () => void stop('SIGINT'));
+    process.once('SIGTERM', () => void stop('SIGTERM'));
 }
 
 main();

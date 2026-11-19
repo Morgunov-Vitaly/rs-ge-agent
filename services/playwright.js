@@ -170,7 +170,7 @@ async function loginToRsGe(onSmsRequired) {
             throw new Error('SMS-код не был получен');
         }
 
-        logger.info('SMS-код получен из Telegram, отправляем его на RS.GE...');
+        logger.info('SMS-код получен из пользовательского интерфейса, отправляем его на RS.GE...');
         await page.locator('#smsText').fill(String(smsCode).trim());
         await page.locator('#btnSmsLogin').click();
 

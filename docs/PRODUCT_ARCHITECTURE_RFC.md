@@ -82,7 +82,7 @@ Open-source экосистема пока фрагментирована: сущ
 | Финальная отправка декларации | Реализована, заблокирована по умолчанию | `IRREVERSIBLE`, HITL, idempotency, `Sent`, screenshot/PDF/SHA-256; ожидает live smoke |
 | Импорт банковских выписок | Не реализовано | В репозитории нет `statement.js` |
 | Ротация логов и временных скриншотов | Работает | TTL, квоты, startup/scheduled cleanup, dry-run |
-| Self-hosted Web UI | Не реализовано | Запланирован как альтернатива Telegram в P1 |
+| Self-hosted Web UI | Read-only MVP | Локальный вход, обзор учета, история периодов, единая проверка RS.GE и SMS; операции записи пока только в Telegram |
 | Multi-user / multi-tenant | Не реализовано | Текущее состояние глобальное |
 | Другие услуги RS.GE | Не реализовано | Нужен модульный контракт |
 
@@ -268,7 +268,8 @@ Retention должен быть настраиваемым для self-hosted у
 - отдельный настраиваемый retention для evidence artifacts;
 - локальная SQLite вместо обязательной Google Sheets;
 - экспорт/импорт Google Sheets как адаптер;
-- минимальный self-hosted Web UI как альтернатива Telegram: status dashboard, история, preview и подтверждение действий.
+- [x] минимальный self-hosted Web UI: локальный вход, status dashboard, история периодов и read-only проверка с SMS;
+- Web preview и подтверждение действий записи с общим action contract.
 
 ### P2 — Расширяемая платформа
 

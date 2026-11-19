@@ -10,6 +10,8 @@ services:
       - ./screenshots:/app/screenshots
     environment:
       - NODE_ENV=production
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8080}:${WEB_PORT:-8080}"
     logging:
       driver: json-file
       options:
