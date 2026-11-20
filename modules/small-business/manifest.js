@@ -11,7 +11,7 @@ const { executeIncomeImport } = require('../../workflows/income-import');
 
 module.exports = defineModule({
     id: 'small-business',
-    version: '0.11.0',
+    version: '0.11.1',
     name: 'Small Business Tax',
     capabilities: [
         'review-declaration',

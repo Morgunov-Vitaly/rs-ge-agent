@@ -2,6 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { calculateSmallBusinessTax } = require('../domain/small-business');
+const { getPaymentDetails } = require('../services/rules');
+
+test('payment details start with the authenticated account before payment', () => {
+    const details = getPaymentDetails('', 72.78);
+    assert.equal(details.paymentUrl, 'https://eservices.rs.ge/Accounting.aspx');
+    assert.match(details.instructions, /Расчетный налог по журналу: 72\.78 GEL/);
+    assert.match(details.instructions, /укажите ваш ИНН/);
+    assert.doesNotMatch(details.instructions, /ePaymentTabOne-EN/);
+});
 
 test('uses 1% while annual income remains within the standard limit', () => {
     const result = calculateSmallBusinessTax(10000, 480000);

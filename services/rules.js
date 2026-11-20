@@ -20,14 +20,15 @@ const {
 function getPaymentDetails(taxPayerId = '', amountGel = 0) {
     return {
         treasuryCode: '101001000',
-        paymentUrl: 'https://www.rs.ge/ePaymentTabOne-EN',
+        paymentUrl: 'https://eservices.rs.ge/Accounting.aspx',
         instructions: `Реквизиты для оплаты налога в бюджет Грузии:\n` +
             `• Получатель: Государственное казначейство (Treasury Service)\n` +
             `• Единый казначейский код: 101001000\n` +
             (taxPayerId ? `• ИНН налогоплательщика: ${taxPayerId}\n` : '• При оплате укажите ваш ИНН налогоплательщика\n') +
             (amountGel ? `• Расчетный налог по журналу: ${amountGel.toFixed(2)} GEL\n` : '') +
             `• Перед платежом проверьте начисление и баланс в личной карточке RS.GE\n` +
-            `• Быстрая онлайн-оплата картой: https://www.rs.ge/ePaymentTabOne-EN\n` +
+            `• Личная карточка RS.GE: https://eservices.rs.ge/Accounting.aspx\n` +
+            `• Проверьте уведомления и сумму на RS.GE перед переходом к оплате\n` +
             `• Срок оплаты: до 15 числа включительно`
     };
 }

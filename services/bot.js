@@ -986,18 +986,18 @@ bot.hears(['💳 Оплатить налог', '/pay'], async (ctx) => {
         }
 
         const reportSummary = await recordsRepository.getMonthlySummary(reportYear, reportMonth);
+        const details = rules.getPaymentDetails('', reportSummary.totalTaxGel);
         if (reportSummary.isPaid) {
             return ctx.reply(
                 `✅ Налог за ${String(reportMonth).padStart(2, '0')}.${reportYear} уже отмечен оплаченным ` +
                 `${reportSummary.paymentDate}. Повторную оплату не формирую.\n` +
-                `Сумма по журналу: ${reportSummary.totalTaxGel.toFixed(2)} GEL.`
+                `Сумма по журналу: ${reportSummary.totalTaxGel.toFixed(2)} GEL.`,
+                Markup.inlineKeyboard([[Markup.button.url('📒 Открыть личную карточку RS.GE', details.paymentUrl)]])
             );
         }
 
-        const details = rules.getPaymentDetails('', reportSummary.totalTaxGel);
-
         await ctx.reply(details.instructions, Markup.inlineKeyboard([
-            [Markup.button.url('💳 Оплатить картой на RS.GE', details.paymentUrl)]
+            [Markup.button.url('📒 Личная карточка RS.GE', details.paymentUrl)]
         ]));
     } catch (err) {
         await ctx.reply(`❌ Ошибка получения реквизитов: ${err.message}`);

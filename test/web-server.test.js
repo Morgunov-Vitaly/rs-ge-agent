@@ -150,7 +150,9 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
         assert.match(dashboardHtml, /Подтверждение перед записью/);
         assert.match(dashboardHtml, /href="https:\/\/docs\.google\.com\/spreadsheets\/d\/demo_sheet_123\/edit"/);
         assert.match(dashboardHtml, /href="https:\/\/decl\.rs\.ge\/decls\.aspx"/);
-        assert.match(dashboardHtml, /href="https:\/\/www\.rs\.ge\/ePaymentTabOne-EN"/);
+        assert.match(dashboardHtml, /href="https:\/\/eservices\.rs\.ge\/Accounting\.aspx"/);
+        assert.match(dashboardHtml, /Личная карточка RS\.GE/);
+        assert.doesNotMatch(dashboardHtml, /href="https:\/\/www\.rs\.ge\/ePaymentTabOne-EN"/);
         assert.match(dashboardHtml, /По журналу рассчитано 10,00 GEL/);
         assert.match(dashboardHtml, /перед повторным платежом проверьте личную карточку RS\.GE/);
         assert.match(dashboardHtml, /101001000/);
