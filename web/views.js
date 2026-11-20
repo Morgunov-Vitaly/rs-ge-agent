@@ -1,7 +1,6 @@
 const {
     MONTH_NAMES_RU,
-    formatReportPeriod,
-    getPreviousReportPeriod
+    formatReportPeriod
 } = require('../domain/reporting-period');
 
 function escapeHtml(value) {
@@ -17,6 +16,13 @@ function money(value) {
     return new Intl.NumberFormat('ru-RU', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
+    }).format(Number(value || 0));
+}
+
+function rate(value) {
+    return new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4
     }).format(Number(value || 0));
 }
 
@@ -51,7 +57,7 @@ function layout({ title, body, session, pageClass = '' }) {
                 <span><strong>RS.GE Agent</strong><small>Налоговый контроль</small></span>
             </a>
             <div class="topbar-actions">
-                <span class="read-only-badge">${icon('shield')} Только чтение</span>
+                <span class="read-only-badge">${icon('shield')} Подтверждение перед записью</span>
                 <form method="post" action="/logout">
                     <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
                     <button class="button button-quiet" type="submit">Выйти</button>
@@ -94,7 +100,7 @@ function loginView({ csrfToken, error = '', username = '' }) {
                 </div>
                 <ul class="trust-list">
                     <li>${icon('shield')} Данные остаются на вашем сервере</li>
-                    <li>${icon('check')} Проверка не изменяет RS.GE и таблицу</li>
+                    <li>${icon('check')} Любая запись требует подтверждения</li>
                     <li>${icon('lock')} SMS-код обрабатывается только на сервере</li>
                 </ul>
             </section>
@@ -122,7 +128,7 @@ function loginView({ csrfToken, error = '', username = '' }) {
 }
 
 function periodOptions(selectedYear, selectedMonth, now = new Date()) {
-    const latest = getPreviousReportPeriod(now);
+    const latest = { year: now.getFullYear(), month: now.getMonth() + 1 };
     const options = [];
     for (let offset = 0; offset < 24; offset += 1) {
         const date = new Date(latest.year, latest.month - 1 - offset, 1);
@@ -152,9 +158,10 @@ function historyRows(history) {
     </tr>`).join('');
 }
 
-function dashboardView({ session, dashboard, error = '', now = new Date() }) {
+function dashboardView({ session, dashboard, error = '', now = new Date(), submissionEnabled = false }) {
     const { period, summary, yearSummary, history } = dashboard;
     const status = sheetStatus(summary);
+    const currentPeriod = period.year === now.getFullYear() && period.month === now.getMonth() + 1;
     return layout({
         title: `Период ${period.key}`,
         session,
@@ -163,7 +170,7 @@ function dashboardView({ session, dashboard, error = '', now = new Date() }) {
                 <div>
                     <p class="eyebrow">Обзор учета</p>
                     <h1>Налоговый период</h1>
-                    <p>Google Sheets показывает плановые суммы. Для подтверждения состояния запустите безопасную проверку RS.GE.</p>
+                    <p>${currentPeriod ? 'Доходы текущего месяца накапливаются. Декларацию можно подать после окончания месяца.' : 'Google Sheets показывает плановые суммы. Для подтверждения состояния запустите безопасную проверку RS.GE.'}</p>
                 </div>
                 <form class="period-picker" method="get" action="/">
                     <label for="period">Период</label>
@@ -180,16 +187,16 @@ function dashboardView({ session, dashboard, error = '', now = new Date() }) {
                     </div>
                     <div>
                         <p class="eyebrow">${escapeHtml(period.label)}</p>
-                        <h2 id="period-title">Данные учета готовы к сверке</h2>
-                        <p>Проверка сопоставит декларацию, фактическую оплату и баланс личной карточки. Никакие данные не будут изменены.</p>
+                        <h2 id="period-title">${currentPeriod ? 'Доходы месяца накапливаются' : 'Данные учета готовы к сверке'}</h2>
+                        <p>${currentPeriod ? 'Добавляйте поступления по мере оплаты. Проверка декларации станет доступна в следующем месяце.' : 'Проверка сопоставит декларацию, фактическую оплату и баланс личной карточки. Никакие данные не будут изменены.'}</p>
                     </div>
-                    <form method="post" action="/checks" class="check-form">
+                    ${!currentPeriod ? `<form method="post" action="/checks" class="check-form">
                         <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
                         <input type="hidden" name="year" value="${period.year}">
                         <input type="hidden" name="month" value="${period.month}">
                         <button class="button button-primary" type="submit">${icon('refresh')} Проверить аккаунт</button>
                         <span>Обычно занимает до минуты. Может потребоваться SMS.</span>
-                    </form>
+                    </form>` : ''}
                 </div>
                 <div class="ledger" aria-label="Суммы по данным учета">
                     <div class="ledger-row ledger-primary">
@@ -210,6 +217,34 @@ function dashboardView({ session, dashboard, error = '', now = new Date() }) {
                     </div>
                 </div>
             </section>
+            <section class="next-actions" aria-label="Действия">
+                <div>
+                    <p class="eyebrow">Учет доходов</p>
+                    <h2>Новое поступление</h2>
+                    <p>Введите дату, сумму и источник. Покажем курс NBG и итог в GEL до записи в таблицу.</p>
+                    <a class="button button-secondary" href="/income">Добавить доход ${icon('arrow')}</a>
+                </div>
+                <div>
+                    <p class="eyebrow">Декларация · ${escapeHtml(period.key)}</p>
+                    <h2>${currentPeriod ? 'Декларация после месяца' : summary.isFiled ? 'Декларация отмечена как поданная' : 'Черновик на RS.GE'}</h2>
+                    <p>${currentPeriod ? 'Черновик станет доступен после окончания месяца.' : summary.isFiled ? 'В таблице период отмечен как поданный. Проверьте его статус на RS.GE.' : 'Перед сохранением сверим суммы и попросим явное подтверждение.'} ${submissionEnabled ? 'Финальная отправка требует отдельного подтверждения.' : 'Финальная отправка пока отключена.'}</p>
+                    ${!summary.isFiled && !currentPeriod ? `
+                    <form method="post" action="/declarations">
+                        <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                        <input type="hidden" name="year" value="${period.year}">
+                        <input type="hidden" name="month" value="${period.month}">
+                        <input type="hidden" name="kind" value="draft">
+                        <button class="button button-secondary" type="submit">Подготовить черновик ${icon('arrow')}</button>
+                    </form>` : ''}
+                    ${submissionEnabled && !summary.isFiled && !currentPeriod ? `<form method="post" action="/declarations" class="submit-action">
+                        <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                        <input type="hidden" name="year" value="${period.year}">
+                        <input type="hidden" name="month" value="${period.month}">
+                        <input type="hidden" name="kind" value="submit">
+                        <button class="button button-secondary" type="submit">Проверить перед отправкой ${icon('arrow')}</button>
+                    </form>` : ''}
+                </div>
+            </section>
             <section class="history-section" aria-labelledby="history-title">
                 <div class="section-heading">
                     <div>
@@ -224,6 +259,51 @@ function dashboardView({ session, dashboard, error = '', now = new Date() }) {
                         <tbody>${historyRows(history)}</tbody>
                     </table>
                 </div>
+            </section>
+        </main>`
+    });
+}
+
+function incomeView({ session, input = {}, pending = null, saved = null, error = '', now = new Date() }) {
+    const preview = pending?.preview;
+    const record = preview?.record || saved?.record;
+    const todayParts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Tbilisi', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(now).map(({ type, value }) => [type, value]));
+    const today = `${todayParts.year}-${todayParts.month}-${todayParts.day}`;
+    return layout({
+        title: preview ? 'Проверка дохода' : 'Добавить доход',
+        session,
+        body: `<main class="operation-shell income-shell">
+            <a class="back-link" href="/">← Обзор</a>
+            <section class="operation-card">
+                <p class="eyebrow">Google Sheets · запись после подтверждения</p>
+                <h1>${saved ? 'Доход записан' : preview ? 'Проверьте поступление' : 'Добавить доход'}</h1>
+                ${error ? `<div class="notice notice-error" role="alert">${icon('alert')}<span>${escapeHtml(error)}</span></div>` : ''}
+                ${record ? `<div class="result-ledger">
+                    <div><span>Дата и источник</span><strong>${escapeHtml(record.date)} · ${escapeHtml(record.description)}</strong></div>
+                    <div><span>Исходная сумма</span><strong>${money(record.amountOriginal)} ${escapeHtml(record.currency)}</strong></div>
+                    <div><span>Курс NBG</span><strong>${rate(record.rate)} GEL</strong></div>
+                    <div><span>Сумма в учете</span><strong>${money(record.amountGel)} GEL</strong></div>
+                    <div><span>Налог на поступление</span><strong>${money(record.taxGel)} GEL</strong></div>
+                    <div><span>Оценка налога за месяц</span><strong>${money((preview || saved).estimatedMonthlyTaxGel)} GEL · ${(preview || saved).ratePercent}%</strong></div>
+                </div>` : ''}
+                ${saved ? `<p class="operation-help">Запись добавлена в Google Sheets. Проверьте ее в журнале периода.</p><a class="button button-primary" href="/?year=${record.date.slice(0, 4)}&month=${Number(record.date.slice(5, 7))}">Открыть период</a>` : preview ? `
+                    <p class="operation-help">Дата и курс будут перепроверены перед записью. Если данные изменились, операция остановится.</p>
+                    <form method="post" action="/income/confirm" class="decision-actions">
+                        <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                        <input type="hidden" name="token" value="${escapeHtml(pending.token)}">
+                        <button class="button button-primary" type="submit">Подтвердить и записать</button>
+                        <a class="button button-secondary" href="/income?edit=1">Изменить</a>
+                    </form>` : `<p class="lead">Укажите дату фактического поступления средств. Для валюты используем официальный курс NBG на эту дату.</p>
+                    <form class="form-stack" method="post" action="/income/preview">
+                        <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                        <label>Дата поступления<input name="date" type="date" max="${today}" value="${escapeHtml(input.date || today)}" required></label>
+                        <label>Сумма<input name="amount" inputmode="decimal" placeholder="2500.00" value="${escapeHtml(input.amount || '')}" required></label>
+                        <label>Валюта<select name="currency">${['USD', 'EUR', 'GEL', 'GBP', 'RUB'].map((code) => `<option value="${code}" ${input.currency === code ? 'selected' : ''}>${code}</option>`).join('')}</select></label>
+                        <label>Описание / источник<input name="description" maxlength="200" value="${escapeHtml(input.description || '')}" placeholder="Оплата по договору" required></label>
+                        <button class="button button-primary" type="submit">Рассчитать и проверить ${icon('arrow')}</button>
+                    </form>`}
             </section>
         </main>`
     });
@@ -253,6 +333,9 @@ function reportHtml(report) {
 }
 
 function operationView({ session, operation }) {
+    if (operation.kind === 'draft' || operation.kind === 'submit') {
+        return declarationOperationView({ session, operation });
+    }
     const waitingSms = operation.status === 'awaiting_sms';
     const pending = operation.status === 'starting' || operation.status === 'checking';
     const completed = operation.status === 'completed';
@@ -311,6 +394,54 @@ function operationView({ session, operation }) {
     });
 }
 
+function declarationOperationView({ session, operation }) {
+    const { kind, status, preview, result } = operation;
+    const isDraft = kind === 'draft';
+    const pending = ['starting', 'checking', 'writing'].includes(status);
+    const waitingSms = status === 'awaiting_sms';
+    const confirming = status === 'awaiting_confirmation';
+    const completed = status === 'completed';
+    const failed = status === 'failed';
+    const heading = completed ? (isDraft ? 'Черновик сохранен' : 'Декларация отправлена')
+        : failed ? 'Действие не завершено'
+            : confirming ? (isDraft ? 'Проверьте черновик' : 'Подтвердите отправку')
+                : waitingSms ? 'Введите код из SMS' : status === 'writing' ? 'Проверяем и записываем' : 'Проверяем RS.GE';
+    return layout({
+        title: heading,
+        session,
+        body: `<main class="operation-shell" ${pending || waitingSms || confirming ? `data-operation-id="${escapeHtml(operation.id)}" data-operation-status="${escapeHtml(status)}"` : ''}>
+            <a class="back-link" href="/?year=${operation.year}&month=${operation.month}">← Обзор периода ${formatReportPeriod(operation.year, operation.month)}</a>
+            <section class="operation-card">
+                <p class="eyebrow">${isDraft ? 'Черновик · сохранение на RS.GE' : 'Декларация · отправка на RS.GE'}</p>
+                <h1>${heading}</h1>
+                ${waitingSms ? `<form class="sms-form" method="post" action="/operations/${escapeHtml(operation.id)}/sms">
+                    <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                    <label for="sms-code">Код подтверждения RS.GE</label>
+                    <input id="sms-code" class="sms-input" name="code" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="one-time-code" required autofocus>
+                    <button class="button button-primary" type="submit">Продолжить ${icon('arrow')}</button>
+                </form>` : ''}
+                ${pending ? '<div class="progress-track"><span></span></div><p class="operation-help">Статус обновится автоматически.</p>' : ''}
+                ${confirming ? `<p class="lead">${isDraft ? 'Это сохранит черновик на RS.GE. Декларация не будет отправлена.' : 'Это отправит декларацию на RS.GE.'}</p>
+                    <div class="result-ledger">
+                        <div><span>Период</span><strong>${escapeHtml(preview.period)}</strong></div>
+                        <div><span>Нарастающий доход · гр. 15</span><strong>${money(preview.fields[15])} GEL</strong></div>
+                        <div><span>Доход за месяц · гр. 20</span><strong>${money(preview.fields[20])} GEL</strong></div>
+                        <div><span>Ставка · гр. 16</span><strong>${money(preview.fields[16])}%</strong></div>
+                        <div><span>Налог · гр. 26</span><strong>${money(preview.fields[26])} GEL</strong></div>
+                    </div>
+                    ${preview.warnings.map((warning) => `<div class="notice notice-warning">${escapeHtml(warning)}</div>`).join('')}
+                    ${operation.hasPreviewImage ? `<figure class="declaration-proof"><img src="/operations/${escapeHtml(operation.id)}/image?kind=preview" alt="Скриншот сохраненного черновика RS.GE перед отправкой"><figcaption>Текущий черновик на RS.GE</figcaption></figure>` : ''}
+                    <div class="decision-actions">
+                        <form method="post" action="/operations/${escapeHtml(operation.id)}/confirm"><input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}"><button class="button button-primary" type="submit">${isDraft ? 'Сохранить черновик' : 'Отправить декларацию'}</button></form>
+                        <form method="post" action="/operations/${escapeHtml(operation.id)}/cancel"><input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}"><button class="button button-secondary" type="submit">Отмена</button></form>
+                    </div>` : ''}
+                ${completed ? `<div class="notice notice-success">${isDraft ? 'Черновик сохранен и проверен на RS.GE. Декларация не отправлена.' : `RS.GE подтвердил статус ${escapeHtml(result.status)}.`}</div>${operation.hasResultImage ? `<figure class="declaration-proof"><img src="/operations/${escapeHtml(operation.id)}/image?kind=result" alt="Скриншот подтвержденного результата RS.GE"><figcaption>Подтверждение RS.GE</figcaption></figure>` : ''}<a class="button button-secondary" href="/">Вернуться к обзору</a>` : ''}
+                ${failed ? `<div class="notice notice-error" role="alert">${icon('alert')}<span>${escapeHtml(operation.error)}</span></div><a class="button button-secondary" href="/">Вернуться к обзору</a>` : ''}
+            </section>
+        </main>`
+    });
+}
+
 function errorView({ session, statusCode, title, message }) {
     return layout({
         title,
@@ -329,6 +460,7 @@ function errorView({ session, statusCode, title, message }) {
 module.exports = {
     dashboardView,
     errorView,
+    incomeView,
     escapeHtml,
     loginView,
     money,

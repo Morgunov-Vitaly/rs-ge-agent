@@ -6,7 +6,7 @@
 
 const { google } = require('googleapis');
 const { config, assertConfig } = require('../config');
-const { parseRecordPeriod } = require('../domain/dates');
+const { parseRecordPeriod, sameRecordDate } = require('../domain/dates');
 
 const SPREADSHEET_ID = config.google.spreadsheetId;
 const CREDENTIALS_PATH = config.google.credentialsPath;
@@ -230,7 +230,7 @@ async function addIncomeRecord(record, sheetName = 'Лист1') {
     // Проверка дубликата по дате, сумме в валюте и валюте
     const isDuplicate = existing.some(item =>
         isIncomeRecord(item) &&
-        item.date === record.date &&
+        sameRecordDate(item.date, record.date) &&
         Math.abs(item.amountOriginal - record.amountOriginal) < 0.001 &&
         item.currency.toUpperCase() === record.currency.toUpperCase()
     );

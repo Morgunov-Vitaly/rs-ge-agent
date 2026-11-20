@@ -1,7 +1,6 @@
 const { parseRecordPeriod } = require('../domain/dates');
 const {
     formatReportPeriod,
-    getPreviousReportPeriod,
     getReportPeriodLabel
 } = require('../domain/reporting-period');
 
@@ -38,7 +37,7 @@ function buildHistory(records, now = new Date(), limit = 12) {
         periods.set(key, current);
     }
 
-    const latest = getPreviousReportPeriod(now);
+    const latest = { year: now.getFullYear(), month: now.getMonth() + 1 };
     return [...periods.values()]
         .filter((item) => (
             item.year < latest.year || (item.year === latest.year && item.month <= latest.month)

@@ -5,10 +5,11 @@ const { executeDeclarationDraftCreation } = require('../../workflows/declaration
 const { executeDeclarationSubmission } = require('../../workflows/declaration-submit');
 const { executePeriodCheck } = require('../../workflows/period-check');
 const { executePaymentReconciliationSync } = require('../../workflows/payment-reconciliation-sync');
+const { executeIncomeEntry } = require('../../workflows/income-entry');
 
 module.exports = defineModule({
     id: 'small-business',
-    version: '0.7.0',
+    version: '0.8.0',
     name: 'Small Business Tax',
     capabilities: [
         'review-declaration',
@@ -16,7 +17,8 @@ module.exports = defineModule({
         'submit-declaration',
         'reconcile-payments',
         'check-period',
-        'sync-payment-reconciliation'
+        'sync-payment-reconciliation',
+        'add-income'
     ],
     actions: [
         {
@@ -48,6 +50,11 @@ module.exports = defineModule({
             id: 'sync-payment-reconciliation',
             risk: ACTION_RISKS.DATA_WRITE,
             handler: executePaymentReconciliationSync
+        },
+        {
+            id: 'add-income',
+            risk: ACTION_RISKS.DATA_WRITE,
+            handler: executeIncomeEntry
         }
     ]
 });

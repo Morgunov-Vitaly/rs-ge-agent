@@ -62,17 +62,18 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
         WEB_SESSION_SECRET: 'test-session-secret-that-is-long-enough',
         WEB_COOKIE_SECURE: 'false'
     });
+    const addedRecords = [];
     const repository = {
         async getMonthlySummary(year, month) {
             return {
                 year,
                 month,
-                recordsCount: 1,
-                totalIncomeGel: 1000,
-                totalTaxGel: 10,
-                status: 'Подана',
-                isFiled: true,
-                isPaid: true
+                recordsCount: month === 11 ? 0 : 1,
+                totalIncomeGel: month === 11 ? 0 : 1000,
+                totalTaxGel: month === 11 ? 0 : 10,
+                status: month === 11 ? 'Ожидает подачи' : 'Подана',
+                isFiled: month !== 11,
+                isPaid: month !== 11
             };
         },
         async getYearlySummary() {
@@ -86,11 +87,14 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
                 paymentDate: '15.11.2026',
                 status: 'Подана'
             }];
-        }
+        },
+        async getAllRecords() { return [...addedRecords]; },
+        async addIncomeRecord(record) { addedRecords.push(record); return { added: true }; }
     };
     const app = createWebApplication({
         appConfig,
         recordsRepository: repository,
+        convertToGel: async () => ({ rate: 2.7, amountGel: 270 }),
         appLogger: { error() {}, warn() {} },
         now: () => new Date('2026-11-19T12:00:00+04:00')
     });
@@ -137,7 +141,14 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
         assert.equal(dashboard.status, 200);
         assert.match(dashboardHtml, /Данные учета готовы к сверке/);
         assert.match(dashboardHtml, /1[\s\u00a0]000,00/);
-        assert.match(dashboardHtml, /Только чтение/);
+        assert.match(dashboardHtml, /Подтверждение перед записью/);
+        const currentMonth = await request(app, {
+            url: '/?year=2026&month=11', cookie: sessionCookie
+        });
+        assert.equal(currentMonth.status, 200);
+        assert.match(currentMonth.body, /Доходы месяца накапливаются/);
+        assert.doesNotMatch(currentMonth.body, /action="\/declarations"/);
+        assert.doesNotMatch(currentMonth.body, /action="\/checks"/);
 
         const noCsrf = await request(app, {
             method: 'POST',
@@ -146,6 +157,38 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
             body: new URLSearchParams({ year: '2026', month: '10' })
         });
         assert.equal(noCsrf.status, 403);
+
+        const incomeForm = await request(app, { url: '/income', cookie: sessionCookie });
+        assert.equal(incomeForm.status, 200);
+        assert.match(incomeForm.body, /Добавить доход/);
+        const incomePreview = await request(app, {
+            method: 'POST', url: '/income/preview', cookie: sessionCookie,
+            body: new URLSearchParams({
+                csrf: extractCsrf(incomeForm.body), date: '2026-11-19', amount: '100',
+                currency: 'USD', description: 'Контракт'
+            })
+        });
+        assert.equal(incomePreview.status, 303);
+        assert.equal(addedRecords.length, 0);
+        const previewPage = await request(app, { url: '/income', cookie: sessionCookie });
+        assert.match(previewPage.body, /270,00/);
+        const token = previewPage.body.match(/name="token" value="([^"]+)"/)?.[1];
+        assert.ok(token);
+        const saved = await request(app, {
+            method: 'POST', url: '/income/confirm', cookie: sessionCookie,
+            body: new URLSearchParams({ csrf: extractCsrf(previewPage.body), token })
+        });
+        assert.equal(saved.status, 303);
+        assert.equal(saved.headers.location, '/income?status=saved');
+        const savedPage = await request(app, { url: '/income?status=saved', cookie: sessionCookie });
+        assert.match(savedPage.body, /Доход записан/);
+        assert.equal(addedRecords.length, 1);
+        const replay = await request(app, {
+            method: 'POST', url: '/income/confirm', cookie: sessionCookie,
+            body: new URLSearchParams({ csrf: extractCsrf(previewPage.body), token })
+        });
+        assert.equal(replay.status, 409);
+        assert.equal(addedRecords.length, 1);
     } finally {
         app.close();
     }

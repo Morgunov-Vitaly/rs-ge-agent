@@ -1,16 +1,22 @@
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
 
 const { config: defaultConfig, assertConfig } = require('../config');
 const { createGoogleSheetsIncomeRepository } = require('../connectors/google-sheets/income-repository');
 const { createRsGeBrowserClient } = require('../connectors/rsge/browser-client');
 const { getPreviousReportPeriod, isValidReportPeriod } = require('../domain/reporting-period');
+const { checkSubmissionPeriod } = require('../domain/small-business');
+const { executeModuleAction } = require('../core/action-contract');
+const smallBusinessModule = require('../modules/small-business/manifest');
 const logger = require('../services/logger');
+const nbg = require('../services/nbg');
 const playwright = require('../services/playwright');
 const { executeAccountCheck } = require('../workflows/account-check');
 const { loadDashboard } = require('./dashboard');
 const { createOperationManager } = require('./operations');
+const { buildIncomePreview, incomeFingerprint, incomeIdempotencyKey } = require('../workflows/income-entry');
 const {
     createOneTimeTokenStore,
     createRateLimiter,
@@ -19,7 +25,7 @@ const {
     setSecurityHeaders,
     verifyPassword
 } = require('./security');
-const { dashboardView, errorView, loginView, operationView } = require('./views');
+const { dashboardView, errorView, incomeView, loginView, operationView } = require('./views');
 
 const ASSETS = Object.freeze({
     '/assets/styles.css': { file: 'styles.css', type: 'text/css; charset=utf-8' },
@@ -49,7 +55,8 @@ function parseRequestedPeriod(url, now) {
     if (compact && /^\d{4}-\d{1,2}$/.test(compact)) {
         [year, month] = compact.split('-').map(Number);
     }
-    return isValidReportPeriod(year, month, now) ? { year, month } : fallback;
+    const current = year === now.getFullYear() && month === now.getMonth() + 1;
+    return current || isValidReportPeriod(year, month, now) ? { year, month } : fallback;
 }
 
 function createWebApplication({
@@ -58,6 +65,7 @@ function createWebApplication({
     loginToRsGe = playwright.loginToRsGe,
     createRsGeClient = createRsGeBrowserClient,
     accountCheck = executeAccountCheck,
+    convertToGel = nbg.convertToGel,
     appLogger = logger,
     now = () => new Date()
 } = {}) {
@@ -70,17 +78,27 @@ function createWebApplication({
     });
     const loginLimiter = createRateLimiter({ limit: 5, windowMs: 15 * 60 * 1000 });
     const loginCsrfTokens = createOneTimeTokenStore({ ttlMs: 10 * 60 * 1000 });
+    const pendingIncome = new Map();
+    const savedIncome = new Map();
+    let incomeWriteInProgress = false;
     const operations = createOperationManager({
         loginToRsGe,
         createRsGeClient,
         executeAccountCheck: accountCheck,
         recordsRepository,
-        logger: appLogger
+        logger: appLogger,
+        submissionEnabled: appConfig.rsGe.enableSubmission
     });
     const cleanupTimer = setInterval(() => {
         sessions.cleanup();
         loginCsrfTokens.cleanup();
         operations.cleanup();
+        for (const [sessionId, item] of pendingIncome) {
+            if (Date.now() - item.createdAt > 10 * 60 * 1000) pendingIncome.delete(sessionId);
+        }
+        for (const [sessionId, item] of savedIncome) {
+            if (Date.now() - item.createdAt > 10 * 60 * 1000) savedIncome.delete(sessionId);
+        }
     }, 5 * 60 * 1000);
     cleanupTimer.unref();
 
@@ -150,7 +168,68 @@ function createWebApplication({
                 }));
             }
             sessions.destroy(request);
+            pendingIncome.delete(session.id);
+            savedIncome.delete(session.id);
             return redirect(response, '/login', { 'Set-Cookie': sessions.clearCookie });
+        }
+
+        if (request.method === 'GET' && url.pathname === '/income') {
+            if (url.searchParams.get('status') === 'saved') {
+                const saved = savedIncome.get(session.id);
+                if (saved && Date.now() - saved.createdAt <= 10 * 60 * 1000) {
+                    return send(response, 200, incomeView({ session, saved: saved.preview, now: now() }));
+                }
+                return redirect(response, '/income');
+            }
+            if (url.searchParams.get('edit') === '1') {
+                const previous = pendingIncome.get(session.id);
+                pendingIncome.delete(session.id);
+                return send(response, 200, incomeView({ session, input: previous?.rawInput, now: now() }));
+            }
+            const pending = pendingIncome.get(session.id);
+            const current = pending && Date.now() - pending.createdAt <= 10 * 60 * 1000 ? pending : null;
+            if (!current) pendingIncome.delete(session.id);
+            return send(response, 200, incomeView({ session, pending: current, now: now() }));
+        }
+
+        if (request.method === 'POST' && url.pathname === '/income/preview') {
+            const form = await readForm(request);
+            if (form.csrf !== session.csrfToken) return send(response, 403, errorView({ session, statusCode: 403, title: 'Запрос отклонен', message: 'Обновите страницу и повторите действие.' }));
+            const rawInput = { date: form.date, amount: form.amount, currency: form.currency, description: form.description };
+            try {
+                const preview = await buildIncomePreview({ input: rawInput, convertToGel, recordsRepository, now: now() });
+                pendingIncome.set(session.id, { rawInput, preview, token: crypto.randomBytes(24).toString('base64url'), createdAt: Date.now() });
+                return redirect(response, '/income');
+            } catch (error) {
+                return send(response, 400, incomeView({ session, input: rawInput, error: error.message, now: now() }));
+            }
+        }
+
+        if (request.method === 'POST' && url.pathname === '/income/confirm') {
+            const form = await readForm(request);
+            if (form.csrf !== session.csrfToken) return send(response, 403, errorView({ session, statusCode: 403, title: 'Запрос отклонен', message: 'Обновите страницу и повторите действие.' }));
+            const pending = pendingIncome.get(session.id);
+            if (!pending || Date.now() - pending.createdAt > 10 * 60 * 1000 || form.token !== pending.token) {
+                pendingIncome.delete(session.id);
+                return send(response, 409, incomeView({ session, error: 'Предпросмотр устарел. Введите данные заново.', now: now() }));
+            }
+            if (incomeWriteInProgress) {
+                return send(response, 409, incomeView({ session, pending, error: 'Другая запись уже сохраняется. Повторите после ее завершения.', now: now() }));
+            }
+            pendingIncome.delete(session.id);
+            incomeWriteInProgress = true;
+            try {
+                const result = await executeModuleAction(smallBusinessModule, 'add-income', {
+                    recordsRepository, convertToGel, rawInput: pending.rawInput,
+                    previewFingerprint: incomeFingerprint(pending.preview), now: now()
+                }, { confirmed: true, idempotencyKey: incomeIdempotencyKey(pending.preview) });
+                savedIncome.set(session.id, { preview: result.preview, createdAt: Date.now() });
+                return redirect(response, '/income?status=saved');
+            } catch (error) {
+                return send(response, 409, incomeView({ session, input: pending.rawInput, error: error.message, now: now() }));
+            } finally {
+                incomeWriteInProgress = false;
+            }
         }
 
         if (request.method === 'GET' && url.pathname === '/') {
@@ -163,7 +242,7 @@ function createWebApplication({
                     month: period.month,
                     now: currentDate
                 });
-                return send(response, 200, dashboardView({ session, dashboard, now: currentDate }));
+                return send(response, 200, dashboardView({ session, dashboard, now: currentDate, submissionEnabled: appConfig.rsGe.enableSubmission }));
             } catch (error) {
                 appLogger.error('Web dashboard failed:', error);
                 const fallback = {
@@ -176,7 +255,8 @@ function createWebApplication({
                     session,
                     dashboard: fallback,
                     error: 'Не удалось прочитать Google Sheets. Проверьте подключение и повторите попытку.',
-                    now: currentDate
+                    now: currentDate,
+                    submissionEnabled: appConfig.rsGe.enableSubmission
                 }));
             }
         }
@@ -214,6 +294,25 @@ function createWebApplication({
             }
         }
 
+        if (request.method === 'POST' && url.pathname === '/declarations') {
+            const form = await readForm(request);
+            if (form.csrf !== session.csrfToken) return send(response, 403, errorView({ session, statusCode: 403, title: 'Запрос отклонен', message: 'Обновите страницу и повторите действие.' }));
+            const year = Number(form.year);
+            const month = Number(form.month);
+            const kind = form.kind;
+            if (!isValidReportPeriod(year, month, now()) || !['draft', 'submit'].includes(kind)) {
+                return send(response, 400, errorView({ session, statusCode: 400, title: 'Некорректные параметры', message: 'Выберите доступный период и действие.' }));
+            }
+            const period = checkSubmissionPeriod(year, month, now());
+            if (!period.canSubmit) return send(response, 409, errorView({ session, statusCode: 409, title: 'Период еще не открыт', message: period.message }));
+            try {
+                const operation = operations.start({ sessionId: session.id, year, month, kind });
+                return redirect(response, `/operations/${operation.id}`);
+            } catch (error) {
+                return send(response, 409, errorView({ session, statusCode: 409, title: 'Действие не запущено', message: error.message }));
+            }
+        }
+
         const operationMatch = url.pathname.match(/^\/operations\/([a-f0-9-]+)$/i);
         if (request.method === 'GET' && operationMatch) {
             const operation = operations.get({ id: operationMatch[1], sessionId: session.id });
@@ -226,6 +325,13 @@ function createWebApplication({
                 }));
             }
             return send(response, 200, operationView({ session, operation }));
+        }
+
+        const imageMatch = url.pathname.match(/^\/operations\/([a-f0-9-]+)\/image$/i);
+        if (request.method === 'GET' && imageMatch) {
+            const image = operations.getImage({ id: imageMatch[1], sessionId: session.id, kind: url.searchParams.get('kind') });
+            if (!image) return send(response, 404, 'Изображение недоступно', 'text/plain; charset=utf-8');
+            return send(response, 200, image, 'image/png', { 'Cache-Control': 'private, no-store' });
         }
 
         const smsMatch = url.pathname.match(/^\/operations\/([a-f0-9-]+)\/sms$/i);
@@ -262,6 +368,17 @@ function createWebApplication({
                 }));
             }
             return redirect(response, `/operations/${smsMatch[1]}`);
+        }
+
+        const decisionMatch = url.pathname.match(/^\/operations\/([a-f0-9-]+)\/(confirm|cancel)$/i);
+        if (request.method === 'POST' && decisionMatch) {
+            const form = await readForm(request);
+            if (form.csrf !== session.csrfToken) return send(response, 403, errorView({ session, statusCode: 403, title: 'Запрос отклонен', message: 'Обновите страницу и повторите действие.' }));
+            const accepted = decisionMatch[2] === 'confirm'
+                ? operations.confirm({ id: decisionMatch[1], sessionId: session.id })
+                : operations.cancel({ id: decisionMatch[1], sessionId: session.id });
+            if (!accepted) return send(response, 409, errorView({ session, statusCode: 409, title: 'Подтверждение недоступно', message: 'Действие уже продолжилось или время ожидания истекло.' }));
+            return redirect(response, `/operations/${decisionMatch[1]}`);
         }
 
         const apiMatch = url.pathname.match(/^\/api\/operations\/([a-f0-9-]+)$/i);

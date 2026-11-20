@@ -26,4 +26,13 @@ function parseRecordPeriod(date) {
     return { year, month, day, date: parsed };
 }
 
-module.exports = { parseRecordPeriod };
+function sameRecordDate(left, right) {
+    const parsedLeft = parseRecordPeriod(left);
+    const parsedRight = parseRecordPeriod(right);
+    return Boolean(parsedLeft && parsedRight &&
+        parsedLeft.year === parsedRight.year &&
+        parsedLeft.month === parsedRight.month &&
+        parsedLeft.day === parsedRight.day);
+}
+
+module.exports = { parseRecordPeriod, sameRecordDate };

@@ -39,6 +39,7 @@ async function getExchangeRate(currencyCode, date) {
     const code = currencyCode.toUpperCase();
     if (code === 'GEL') {
         return {
+            currency: 'GEL',
             rate: 1,
             quantity: 1,
             ratePerUnit: 1,

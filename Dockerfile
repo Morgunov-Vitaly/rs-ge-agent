@@ -41,6 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Указываем Playwright использовать установленный системный Chromium из репозитория Debian
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+ENV TZ=Asia/Tbilisi
 
 WORKDIR /app
 

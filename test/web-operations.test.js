@@ -122,3 +122,91 @@ test('web operation reports an actionable login error without exposing a false s
     assert.match(html, /Проверка не завершена/);
     assert.doesNotMatch(html, /Проверка завершена без изменения данных/);
 });
+
+test('web draft waits for confirmation before saving and rejects a second click', async () => {
+    let writes = 0;
+    const manager = createOperationManager({
+        loginToRsGe: async () => ({ page: {}, browser: { close: async () => undefined } }),
+        createRsGeClient: () => ({}),
+        executeAccountCheck: async () => { throw new Error('wrong action'); },
+        executeDeclarationReviewAction: async () => ({
+            exists: false,
+            summary: { totalIncomeGel: 100, totalTaxGel: 1, recordsCount: 1 },
+            yearSummary: { totalIncomeGel: 100 }
+        }),
+        executeAction: async (_manifest, actionId, input, execution) => {
+            assert.equal(actionId, 'create-declaration-draft');
+            assert.equal(execution.confirmed, true);
+            assert.ok(input.previewFingerprint);
+            writes += 1;
+            return { created: true, draft: { status: 'Draft', screenshotBuffer: Buffer.from('png-data') } };
+        },
+        recordsRepository: {},
+        logger: { error() {}, warn() {} }
+    });
+    const started = manager.start({ sessionId: 'owner', year: 2026, month: 10, kind: 'draft' });
+    const reviewing = await waitFor(
+        () => manager.get({ id: started.id, sessionId: 'owner' }),
+        (operation) => operation.status === 'awaiting_confirmation'
+    );
+    assert.equal(reviewing.preview.fields[20], 100);
+    assert.equal(manager.getImage({ id: started.id, sessionId: 'owner', kind: 'result' }), null);
+    assert.equal(writes, 0);
+    assert.equal(manager.confirm({ id: started.id, sessionId: 'intruder' }), false);
+    assert.equal(manager.confirm({ id: started.id, sessionId: 'owner' }), true);
+    assert.equal(manager.confirm({ id: started.id, sessionId: 'owner' }), false);
+    const completed = await waitFor(
+        () => manager.get({ id: started.id, sessionId: 'owner' }),
+        (operation) => operation.status === 'completed'
+    );
+    assert.equal(completed.result.created, true);
+    assert.equal(completed.hasResultImage, true);
+    assert.equal(manager.getImage({ id: started.id, sessionId: 'intruder', kind: 'result' }), null);
+    assert.equal(manager.getImage({ id: started.id, sessionId: 'owner', kind: 'result' }).toString(), 'png-data');
+    assert.equal(writes, 1);
+});
+
+test('web submission cannot start while safety flag is disabled', () => {
+    const manager = createOperationManager({
+        loginToRsGe: async () => { throw new Error('must not log in'); },
+        createRsGeClient: () => ({}),
+        executeAccountCheck: async () => ({}),
+        recordsRepository: {},
+        logger: { error() {}, warn() {} }
+    });
+    assert.throws(
+        () => manager.start({ sessionId: 'owner', year: 2026, month: 10, kind: 'submit' }),
+        { code: 'SUBMISSION_DISABLED' }
+    );
+});
+
+test('cancelling web draft releases the browser without writing', async () => {
+    let closed = false;
+    let writes = 0;
+    const manager = createOperationManager({
+        loginToRsGe: async () => ({ page: {}, browser: { close: async () => { closed = true; } } }),
+        createRsGeClient: () => ({}),
+        executeAccountCheck: async () => ({}),
+        executeDeclarationReviewAction: async () => ({
+            exists: false,
+            summary: { totalIncomeGel: 100, totalTaxGel: 1, recordsCount: 1 },
+            yearSummary: { totalIncomeGel: 100 }
+        }),
+        executeAction: async () => { writes += 1; },
+        recordsRepository: {},
+        logger: { error() {}, warn() {} }
+    });
+    const started = manager.start({ sessionId: 'owner', year: 2026, month: 10, kind: 'draft' });
+    await waitFor(
+        () => manager.get({ id: started.id, sessionId: 'owner' }),
+        (operation) => operation.status === 'awaiting_confirmation'
+    );
+    assert.equal(manager.cancel({ id: started.id, sessionId: 'owner' }), true);
+    await waitFor(
+        () => manager.get({ id: started.id, sessionId: 'owner' }),
+        (operation) => operation.status === 'failed'
+    );
+    await waitFor(() => closed, Boolean);
+    assert.equal(writes, 0);
+    assert.equal(closed, true);
+});

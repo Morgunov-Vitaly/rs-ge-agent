@@ -10,6 +10,7 @@ services:
       - ./screenshots:/app/screenshots
     environment:
       - NODE_ENV=production
+      - TZ=Asia/Tbilisi
     ports:
       - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8080}:${WEB_PORT:-8080}"
     logging:
