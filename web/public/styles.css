@@ -74,6 +74,7 @@ h2 { margin-bottom: 0.55rem; font-size: 1.35rem; line-height: 1.22; letter-spaci
 
 .brand { display: inline-flex; align-items: center; gap: 0.75rem; color: var(--color-ink); text-decoration: none; }
 .brand-mark { display: grid; width: 2.5rem; height: 2.5rem; place-items: center; border-radius: 0.7rem; background: var(--color-ink); color: var(--color-surface); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.06em; }
+.brand-mark svg { width: 1.75rem; height: 1.75rem; }
 .brand strong, .brand small { display: block; }
 .brand strong { line-height: 1.1; }
 .brand small { margin-top: 0.2rem; color: var(--color-ink-muted); font-size: 0.72rem; }
@@ -81,6 +82,8 @@ h2 { margin-bottom: 0.55rem; font-size: 1.35rem; line-height: 1.22; letter-spaci
 .topbar { display: flex; min-height: 4.75rem; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--color-border); padding: 0.75rem max(1.25rem, calc((100vw - 76rem) / 2)); background: color-mix(in oklch, var(--color-canvas) 92%, transparent); }
 .topbar-actions { display: flex; align-items: center; gap: 0.5rem; }
 .read-only-badge, .source-label { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--color-ink-muted); font-size: 0.78rem; font-weight: 650; }
+.source-link { text-decoration: none; }
+.source-link:hover { color: var(--color-primary); text-decoration: underline; }
 .read-only-badge { border: 1px solid var(--color-border); border-radius: 999px; padding: 0.4rem 0.65rem; background: var(--color-surface); }
 
 .login-page { background: var(--color-canvas); }

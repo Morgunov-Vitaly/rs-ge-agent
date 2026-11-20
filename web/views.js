@@ -49,11 +49,19 @@ function icon(name) {
     return `<svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || ''}</svg>`;
 }
 
+function brandIcon() {
+    return `<svg viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <path d="M10 28V9.5A2.5 2.5 0 0 1 12.5 7H25l5 5v11" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M25 7v5h5M15 17h9M15 22h5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="m17 29 5 5 10-11" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
+}
+
 function layout({ title, body, session, pageClass = '' }) {
     const navigation = session
         ? `<header class="topbar">
             <a class="brand" href="/" aria-label="RS.GE Agent, главная">
-                <span class="brand-mark">RS</span>
+                <span class="brand-mark">${brandIcon()}</span>
                 <span><strong>RS.GE Agent</strong><small>Налоговый контроль</small></span>
             </a>
             <div class="topbar-actions">
@@ -90,7 +98,7 @@ function loginView({ csrfToken, error = '', username = '' }) {
         body: `<main class="login-shell">
             <section class="login-intro" aria-labelledby="login-title">
                 <div class="brand brand-login">
-                    <span class="brand-mark">RS</span>
+                    <span class="brand-mark">${brandIcon()}</span>
                     <span><strong>RS.GE Agent</strong><small>Налоговый контроль</small></span>
                 </div>
                 <div>
@@ -158,7 +166,7 @@ function historyRows(history) {
     </tr>`).join('');
 }
 
-function dashboardView({ session, dashboard, error = '', now = new Date(), submissionEnabled = false }) {
+function dashboardView({ session, dashboard, error = '', now = new Date(), submissionEnabled = false, spreadsheetUrl = '' }) {
     const { period, summary, yearSummary, history } = dashboard;
     const status = sheetStatus(summary);
     const currentPeriod = period.year === now.getFullYear() && period.month === now.getMonth() + 1;
@@ -227,7 +235,7 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
                 <div>
                     <p class="eyebrow">Декларация · ${escapeHtml(period.key)}</p>
                     <h2>${currentPeriod ? 'Декларация после месяца' : summary.isFiled ? 'Декларация отмечена как поданная' : 'Черновик на RS.GE'}</h2>
-                    <p>${currentPeriod ? 'Черновик станет доступен после окончания месяца.' : summary.isFiled ? 'В таблице период отмечен как поданный. Проверьте его статус на RS.GE.' : 'Перед сохранением сверим суммы и попросим явное подтверждение.'} ${submissionEnabled ? 'Финальная отправка требует отдельного подтверждения.' : 'Финальная отправка пока отключена.'}</p>
+                    <p>${currentPeriod ? 'Черновик станет доступен после окончания месяца.' : summary.isFiled ? 'В таблице период отмечен как поданный. <a href="https://decl.rs.ge/decls.aspx" target="_blank" rel="noopener noreferrer">Проверьте его статус в списке деклараций RS.GE ↗</a>' : 'Перед сохранением сверим суммы и попросим явное подтверждение.'} ${submissionEnabled ? 'Финальная отправка требует отдельного подтверждения.' : 'Финальная отправка пока отключена.'}</p>
                     ${!summary.isFiled && !currentPeriod ? `
                     <form method="post" action="/declarations">
                         <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
@@ -251,7 +259,7 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
                         <p class="eyebrow">Журнал</p>
                         <h2 id="history-title">История периодов</h2>
                     </div>
-                    <span class="source-label">${icon('table')} Google Sheets</span>
+                    ${spreadsheetUrl ? `<a class="source-label source-link" href="${escapeHtml(spreadsheetUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть Google Таблицу в новой вкладке">${icon('table')} Google Sheets ↗</a>` : `<span class="source-label">${icon('table')} Google Sheets</span>`}
                 </div>
                 <div class="table-wrap">
                     <table>

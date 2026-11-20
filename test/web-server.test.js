@@ -60,7 +60,8 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
         WEB_USERNAME: 'owner',
         WEB_PASSWORD_HASH: passwordHash,
         WEB_SESSION_SECRET: 'test-session-secret-that-is-long-enough',
-        WEB_COOKIE_SECURE: 'false'
+        WEB_COOKIE_SECURE: 'false',
+        GOOGLE_SPREADSHEET_ID: 'demo_sheet_123'
     });
     const addedRecords = [];
     const repository = {
@@ -142,6 +143,9 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
         assert.match(dashboardHtml, /Данные учета готовы к сверке/);
         assert.match(dashboardHtml, /1[\s\u00a0]000,00/);
         assert.match(dashboardHtml, /Подтверждение перед записью/);
+        assert.match(dashboardHtml, /href="https:\/\/docs\.google\.com\/spreadsheets\/d\/demo_sheet_123\/edit"/);
+        assert.match(dashboardHtml, /href="https:\/\/decl\.rs\.ge\/decls\.aspx"/);
+        assert.match(dashboardHtml, /<span class="brand-mark"><svg/);
         const currentMonth = await request(app, {
             url: '/?year=2026&month=11', cookie: sessionCookie
         });

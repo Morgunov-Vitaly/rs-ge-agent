@@ -71,6 +71,9 @@ function createWebApplication({
 } = {}) {
     assertConfig(appConfig, ['web']);
     const secureCookies = appConfig.web.secureCookies;
+    const spreadsheetUrl = /^[A-Za-z0-9_-]+$/.test(appConfig.google.spreadsheetId)
+        ? `https://docs.google.com/spreadsheets/d/${appConfig.google.spreadsheetId}/edit`
+        : '';
     const sessions = createSessionStore({
         secret: appConfig.web.sessionSecret,
         ttlMs: appConfig.web.sessionTtlMinutes * 60 * 1000,
@@ -242,7 +245,7 @@ function createWebApplication({
                     month: period.month,
                     now: currentDate
                 });
-                return send(response, 200, dashboardView({ session, dashboard, now: currentDate, submissionEnabled: appConfig.rsGe.enableSubmission }));
+                return send(response, 200, dashboardView({ session, dashboard, now: currentDate, submissionEnabled: appConfig.rsGe.enableSubmission, spreadsheetUrl }));
             } catch (error) {
                 appLogger.error('Web dashboard failed:', error);
                 const fallback = {
@@ -256,7 +259,8 @@ function createWebApplication({
                     dashboard: fallback,
                     error: 'Не удалось прочитать Google Sheets. Проверьте подключение и повторите попытку.',
                     now: currentDate,
-                    submissionEnabled: appConfig.rsGe.enableSubmission
+                    submissionEnabled: appConfig.rsGe.enableSubmission,
+                    spreadsheetUrl
                 }));
             }
         }
