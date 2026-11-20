@@ -20,6 +20,9 @@ const { createOperationManager } = require('./operations');
 const { buildIncomePreview, incomeFingerprint, incomeIdempotencyKey } = require('../workflows/income-entry');
 const { buildIncomeMaintenancePreview, previewFingerprint: maintenanceFingerprint,
     idempotencyKey: maintenanceIdempotencyKey } = require('../workflows/income-maintenance');
+const { buildIncomeImportPreview, importFingerprint, importIdempotencyKey } = require('../workflows/income-import');
+const { exportCsv, exportXlsx, parseImportFile } = require('./ledger-file');
+const { readLedgerUpload } = require('./upload');
 const {
     createOneTimeTokenStore,
     createRateLimiter,
@@ -28,7 +31,7 @@ const {
     setSecurityHeaders,
     verifyPassword
 } = require('./security');
-const { dashboardView, errorView, incomeView, ledgerEditView, ledgerPreviewView,
+const { dashboardView, errorView, incomeView, ledgerEditView, ledgerImportView, ledgerPreviewView,
     ledgerView, loginView, operationView } = require('./views');
 
 const ASSETS = Object.freeze({
@@ -91,6 +94,7 @@ function createWebApplication({
     const pendingIncome = new Map();
     const savedIncome = new Map();
     const pendingMaintenance = new Map();
+    const pendingImport = new Map();
     let incomeWriteInProgress = false;
     const operations = createOperationManager({
         loginToRsGe,
@@ -112,6 +116,9 @@ function createWebApplication({
         }
         for (const [sessionId, item] of pendingMaintenance) {
             if (Date.now() - item.createdAt > 10 * 60 * 1000) pendingMaintenance.delete(sessionId);
+        }
+        for (const [sessionId, item] of pendingImport) {
+            if (Date.now() - item.createdAt > 10 * 60 * 1000) pendingImport.delete(sessionId);
         }
     }, 5 * 60 * 1000);
     cleanupTimer.unref();
@@ -185,6 +192,7 @@ function createWebApplication({
             pendingIncome.delete(session.id);
             savedIncome.delete(session.id);
             pendingMaintenance.delete(session.id);
+            pendingImport.delete(session.id);
             return redirect(response, '/login', { 'Set-Cookie': sessions.clearCookie });
         }
 
@@ -304,7 +312,8 @@ function createWebApplication({
                 const totalPages = Math.max(1, Math.ceil(filtered.length / 50));
                 const currentPage = Math.min(page, totalPages);
                 const notice = url.searchParams.get('notice') === 'updated' ? 'Запись обновлена.'
-                    : url.searchParams.get('notice') === 'deleted' ? 'Запись удалена из учета; история изменений сохранена.' : '';
+                    : url.searchParams.get('notice') === 'deleted' ? 'Запись удалена из учета; история изменений сохранена.'
+                        : url.searchParams.get('notice') === 'imported' ? 'Новые доходы импортированы в журнал.' : '';
                 return send(response, 200, ledgerView({ session, rows: filtered.slice((currentPage - 1) * 50, currentPage * 50),
                     year: selected?.year, month: selected?.month, allPeriods, page: currentPage,
                     totalPages, totals, storageDriver, notice, now: now() }));
@@ -312,6 +321,87 @@ function createWebApplication({
                 appLogger.error('Web ledger failed:', error);
                 return send(response, 503, errorView({ session, statusCode: 503,
                     title: 'Журнал недоступен', message: 'Не удалось прочитать записи. Проверьте подключение к хранилищу.' }));
+            }
+        }
+
+        if (request.method === 'GET' && /^\/ledger\/export\.(csv|xlsx)$/.test(url.pathname)) {
+            const format = url.pathname.endsWith('.csv') ? 'csv' : 'xlsx';
+            const allPeriods = !url.searchParams.has('period') || url.searchParams.get('period') === 'all';
+            const selected = allPeriods ? null : parseRequestedPeriod(url, now());
+            const records = (await recordsRepository.getAllRecords()).filter((record) => {
+                if (allPeriods) return true;
+                const date = parseRecordPeriod(record.recordType === 'Платёж RS.GE'
+                    ? record.rsPaymentDate : record.date);
+                return date?.year === selected.year && date.month === selected.month;
+            });
+            const body = format === 'csv' ? exportCsv(records) : await exportXlsx(records);
+            const period = allPeriods ? 'all' : `${selected.year}-${String(selected.month).padStart(2, '0')}`;
+            return send(response, 200, body,
+                format === 'csv' ? 'text/csv; charset=utf-8'
+                    : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                { 'Content-Disposition': `attachment; filename="rs-ge-ledger-${period}.${format}"`,
+                    'Cache-Control': 'private, no-store' });
+        }
+
+        if (url.pathname === '/ledger/import' && request.method === 'GET') {
+            if (storageDriver !== 'sqlite') return send(response, 409, errorView({ session, statusCode: 409,
+                title: 'Импорт недоступен', message: 'Для импорта включите локальный журнал SQLite.' }));
+            const pending = pendingImport.get(session.id);
+            return send(response, 200, ledgerImportView({ session,
+                pending: pending && Date.now() - pending.createdAt <= 10 * 60 * 1000 ? pending : null }));
+        }
+
+        if (url.pathname === '/ledger/import/preview' && request.method === 'POST') {
+            if (storageDriver !== 'sqlite') return send(response, 409, errorView({ session, statusCode: 409,
+                title: 'Импорт недоступен', message: 'Для импорта включите локальный журнал SQLite.' }));
+            try {
+                const upload = await readLedgerUpload(request);
+                if (upload.csrf !== session.csrfToken) return send(response, 403, errorView({ session,
+                    statusCode: 403, title: 'Запрос отклонен', message: 'Обновите страницу и повторите действие.' }));
+                const parsed = await parseImportFile(upload);
+                const preview = await buildIncomeImportPreview({ parsed, recordsRepository,
+                    convertToGel, now: now() });
+                pendingImport.set(session.id, { parsed, preview,
+                    filename: path.basename(upload.filename).slice(0, 120),
+                    token: crypto.randomBytes(24).toString('base64url'), createdAt: Date.now() });
+                return redirect(response, '/ledger/import');
+            } catch (error) {
+                pendingImport.delete(session.id);
+                return send(response, error.code === 'BODY_TOO_LARGE' ? 413 : 400,
+                    ledgerImportView({ session, error: error.message }));
+            }
+        }
+
+        if (url.pathname === '/ledger/import/confirm' && request.method === 'POST') {
+            if (storageDriver !== 'sqlite') return send(response, 409, errorView({ session, statusCode: 409,
+                title: 'Импорт недоступен', message: 'Для импорта включите локальный журнал SQLite.' }));
+            const form = await readForm(request);
+            if (form.csrf !== session.csrfToken) return send(response, 403, errorView({ session,
+                statusCode: 403, title: 'Запрос отклонен', message: 'Обновите страницу и повторите действие.' }));
+            const pending = pendingImport.get(session.id);
+            if (!pending || pending.token !== form.token || Date.now() - pending.createdAt > 10 * 60 * 1000) {
+                pendingImport.delete(session.id);
+                return send(response, 409, ledgerImportView({ session,
+                    error: 'Предпросмотр устарел. Загрузите файл заново.' }));
+            }
+            if (pending.preview.errors.length || !pending.preview.importable.length) {
+                return send(response, 409, ledgerImportView({ session, pending,
+                    error: 'Исправьте ошибки или добавьте новые записи перед подтверждением.' }));
+            }
+            if (incomeWriteInProgress) return send(response, 409, ledgerImportView({ session, pending,
+                error: 'Другая запись уже выполняется. Повторите после ее завершения.' }));
+            pendingImport.delete(session.id);
+            incomeWriteInProgress = true;
+            try {
+                await executeModuleAction(smallBusinessModule, 'import-income', {
+                    parsed: pending.parsed, recordsRepository, convertToGel,
+                    confirmedFingerprint: importFingerprint(pending.preview), now: now()
+                }, { confirmed: true, idempotencyKey: importIdempotencyKey(pending.preview) });
+                return redirect(response, '/ledger?notice=imported');
+            } catch (error) {
+                return send(response, 409, ledgerImportView({ session, error: error.message }));
+            } finally {
+                incomeWriteInProgress = false;
             }
         }
 

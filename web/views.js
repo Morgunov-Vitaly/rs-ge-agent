@@ -497,7 +497,15 @@ function ledgerView({ session, rows, year, month, allPeriods = false, page, tota
                 <div><span>Поступлений</span><strong>${totals.incomeCount}</strong></div>
                 <div><span>Отдельных платежей RS.GE</span><strong>${totals.portalCount}</strong></div>
             </div>
-            <div class="ledger-tools"><a class="button button-primary" href="/income">Добавить доход ${icon('arrow')}</a><span>Удаленные записи остаются в защищенной истории изменений.</span></div>
+            <div class="ledger-tools">
+                <div class="ledger-tool-buttons">
+                    <a class="button button-primary" href="/income">Добавить доход ${icon('arrow')}</a>
+                    ${storageDriver === 'sqlite' ? '<a class="button button-secondary" href="/ledger/import">Импортировать</a>' : ''}
+                    <a class="button button-secondary" href="/ledger/export.csv?period=${periodQuery}">Скачать CSV</a>
+                    <a class="button button-secondary" href="/ledger/export.xlsx?period=${periodQuery}">Скачать XLSX</a>
+                </div>
+                <span>Удаленные записи остаются в защищенной истории изменений.</span>
+            </div>
             <p class="ledger-scroll-hint">Прокрутите таблицу вправо, чтобы увидеть оплату, сверку и действия →</p>
             <div class="table-wrap ledger-table-wrap"><table class="ledger-table">
                 <thead><tr><th>Дата</th><th>Описание / источник</th><th class="numeric">Сумма</th><th class="numeric">GEL</th><th class="numeric">Налог</th><th>Дата оплаты</th><th>RS.GE оплата</th><th>Сверка / статус</th><th>Действия</th></tr></thead>
@@ -508,6 +516,52 @@ function ledgerView({ session, rows, year, month, allPeriods = false, page, tota
                 <span>${page} / ${totalPages}</span>
                 ${page < totalPages ? `<a href="/ledger?period=${periodQuery}&page=${page + 1}">Далее →</a>` : '<span></span>'}
             </nav>` : ''}
+        </main>`
+    });
+}
+
+function ledgerImportView({ session, pending = null, error = '' }) {
+    const preview = pending?.preview;
+    const sample = preview?.importable.slice(0, 30) || [];
+    const issues = [...(preview?.errors || []), ...(preview?.duplicates || [])].slice(0, 30);
+    return layout({
+        title: 'Импорт доходов', session,
+        body: `<main class="app-shell ledger-page">
+            <a class="back-link" href="/ledger">← Журнал учета</a>
+            <section class="page-heading"><div>
+                <p class="eyebrow">Локальный журнал · DATA_WRITE</p>
+                <h1>Импорт доходов</h1>
+                <p>Загрузите CSV или XLSX до 2 МБ. Достаточно колонок «Дата», «Сумма (валюта)», «Валюта» и «Описание / Источник». Экспорт из этого журнала тоже подойдет.</p>
+            </div></section>
+            ${error ? `<div class="notice notice-error" role="alert">${icon('alert')}<span>${escapeHtml(error)}</span></div>` : ''}
+            <section class="operation-card import-card">
+                <h2>Выберите файл</h2>
+                <p>Курс NBG и налог рассчитываются заново. Дубликаты пропускаются. Строки платежей RS.GE не импортируются; для полного восстановления используйте резервную копию SQLite.</p>
+                <form class="form-stack" method="post" action="/ledger/import/preview" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                    <label>CSV или XLSX<input name="file" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label>
+                    <button class="button button-primary" type="submit">Проверить файл ${icon('arrow')}</button>
+                </form>
+            </section>
+            ${preview ? `<section class="import-preview">
+                <p class="eyebrow">Предпросмотр · ${escapeHtml(pending.filename)}</p>
+                <h2>Проверка завершена</h2>
+                <div class="ledger-summary">
+                    <div><span>Новых доходов</span><strong>${preview.importable.length}</strong></div>
+                    <div><span>Дубликатов</span><strong>${preview.duplicates.length}</strong></div>
+                    <div><span>Ошибок</span><strong>${preview.errors.length}</strong></div>
+                    <div><span>Доход в GEL</span><strong>${money(preview.totalIncomeGel)}</strong></div>
+                </div>
+                ${preview.portalRows ? `<p class="operation-help">Строк платежей RS.GE пропущено: ${preview.portalRows}.</p>` : ''}
+                ${sample.length ? `<div class="table-wrap"><table><thead><tr><th>Строка</th><th>Дата</th><th>Описание</th><th>Сумма</th><th>GEL</th><th>Налог</th></tr></thead><tbody>${sample.map(({ line, record }) => `<tr><td>${line}</td><td>${escapeHtml(displayDate(record.date))}</td><td>${escapeHtml(record.description)}</td><td>${money(record.amountOriginal)} ${escapeHtml(record.currency)}</td><td>${money(record.amountGel)}</td><td>${money(record.taxGel)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+                ${preview.importable.length > sample.length ? `<p class="operation-help">Показаны первые ${sample.length} новых записей из ${preview.importable.length}.</p>` : ''}
+                ${issues.length ? `<div class="import-issues"><h3>Пропущенные строки и ошибки</h3><ul>${issues.map(({ line, reason }) => `<li>Строка ${line}: ${escapeHtml(reason)}</li>`).join('')}</ul></div>` : ''}
+                ${preview.errors.length ? '<div class="notice notice-warning">Исправьте ошибки в файле и загрузите его повторно. Запись пока недоступна.</div>' : preview.importable.length ? `<form class="decision-actions" method="post" action="/ledger/import/confirm">
+                    <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                    <input type="hidden" name="token" value="${escapeHtml(pending.token)}">
+                    <button class="button button-primary" type="submit">Добавить ${russianCount(preview.importable.length, 'запись', 'записи', 'записей')}</button>
+                </form>` : '<div class="notice notice-warning">Новых доходов для записи нет.</div>'}
+            </section>` : ''}
         </main>`
     });
 }
@@ -604,6 +658,7 @@ module.exports = {
     errorView,
     incomeView,
     ledgerEditView,
+    ledgerImportView,
     ledgerPreviewView,
     ledgerView,
     escapeHtml,

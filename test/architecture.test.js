@@ -85,6 +85,7 @@ test('module contract rejects unsafe or incomplete actions', () => {
             ACTION_RISKS.DATA_WRITE,
             ACTION_RISKS.DATA_WRITE,
             ACTION_RISKS.DATA_WRITE,
+            ACTION_RISKS.DATA_WRITE,
             ACTION_RISKS.DATA_WRITE
         ]
     );

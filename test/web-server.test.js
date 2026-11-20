@@ -23,13 +23,13 @@ function extractCsrf(html) {
     return html.match(/name="csrf" value="([^"]+)"/)?.[1];
 }
 
-function request(app, { method = 'GET', url = '/', cookie = '', body = '' } = {}) {
+function request(app, { method = 'GET', url = '/', cookie = '', body = '', requestHeaders = {} } = {}) {
     return new Promise((resolve) => {
-        const input = Readable.from(body ? [Buffer.from(String(body))] : []);
+        const input = Readable.from(body ? [Buffer.isBuffer(body) ? body : Buffer.from(String(body))] : []);
         input.method = method;
         input.url = url;
         input.socket = { remoteAddress: '127.0.0.1' };
-        input.headers = cookie ? { cookie } : {};
+        input.headers = { ...(cookie ? { cookie } : {}), ...requestHeaders };
         const headers = {};
         const chunks = [];
         const response = {
@@ -46,10 +46,11 @@ function request(app, { method = 'GET', url = '/', cookie = '', body = '' } = {}
             },
             end(chunk) {
                 if (chunk) chunks.push(Buffer.from(chunk));
+                const buffer = Buffer.concat(chunks);
                 resolve({
                     status: this.statusCode || 200,
                     headers,
-                    body: Buffer.concat(chunks).toString('utf8')
+                    body: buffer.toString('utf8'), buffer
                 });
             }
         };
@@ -270,4 +271,64 @@ test('web ledger previews edits and deletion, protects filed periods and require
         body: new URLSearchParams({ csrf: extractCsrf(deletePreview.body), token: deleteToken }) });
     assert.equal(deleted.status, 303);
     assert.equal(await repository.getRecord(current.id), null);
+});
+
+test('web ledger exports files and imports CSV only after preview and confirmation', async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rs-ge-web-import-'));
+    const repository = createSqliteIncomeRepository({ filePath: path.join(directory, 'ledger.sqlite') });
+    t.after(() => { repository.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+    const passwordHash = await hashPassword('import-secret', 'web-import-salt');
+    const appConfig = loadConfig({ STORAGE_DRIVER: 'sqlite', SQLITE_PATH: path.join(directory, 'ledger.sqlite'),
+        WEB_ENABLED: 'true', WEB_USERNAME: 'owner', WEB_PASSWORD_HASH: passwordHash,
+        WEB_SESSION_SECRET: 'import-session-secret-long-enough', WEB_COOKIE_SECURE: 'false' });
+    const app = createWebApplication({ appConfig, recordsRepository: repository,
+        convertToGel: async (amount) => ({ rate: 2.7, amountGel: Number((amount * 2.7).toFixed(2)) }),
+        appLogger: { error() {}, warn() {} }, now: () => new Date('2026-11-20T12:00:00+04:00') });
+    t.after(() => app.close());
+    const login = await request(app, { url: '/login' });
+    const signedIn = await request(app, { method: 'POST', url: '/login',
+        body: new URLSearchParams({ username: 'owner', password: 'import-secret', csrf: extractCsrf(login.body) }) });
+    const cookie = extractCookie(signedIn, 'rsge_session');
+    assert.ok(cookie);
+    assert.equal((await request(app, { url: '/ledger/export.csv' })).status, 303);
+
+    const importPage = await request(app, { url: '/ledger/import', cookie });
+    assert.equal(importPage.status, 200);
+    assert.match(importPage.body, /Импорт доходов/);
+    const boundary = 'rs-ge-test-boundary';
+    const csv = Buffer.from('\uFEFFДата;Сумма (валюта);Валюта;Описание / Источник\r\n18.11.2026;100;USD;Новый контракт\r\n');
+    const upload = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="csrf"\r\n\r\n${extractCsrf(importPage.body)}\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="income.csv"\r\nContent-Type: text/csv\r\n\r\n`),
+        csv, Buffer.from(`\r\n--${boundary}--\r\n`)
+    ]);
+    const previewResponse = await request(app, { method: 'POST', url: '/ledger/import/preview', cookie,
+        requestHeaders: { 'content-type': `multipart/form-data; boundary=${boundary}` }, body: upload });
+    assert.equal(previewResponse.status, 303);
+    assert.equal((await repository.getAllRecords()).length, 0);
+    const preview = await request(app, { url: '/ledger/import', cookie });
+    assert.match(preview.body, /Добавить 1 запись/);
+    assert.match(preview.body, /270,00/);
+    const token = preview.body.match(/name="token" value="([^"]+)"/)?.[1];
+    const saved = await request(app, { method: 'POST', url: '/ledger/import/confirm', cookie,
+        body: new URLSearchParams({ csrf: extractCsrf(preview.body), token }) });
+    assert.equal(saved.status, 303);
+    assert.equal((await repository.getAllRecords()).length, 1);
+    assert.equal((await request(app, { method: 'POST', url: '/ledger/import/confirm', cookie,
+        body: new URLSearchParams({ csrf: extractCsrf(preview.body), token }) })).status, 409);
+
+    const exportedCsv = await request(app, { url: '/ledger/export.csv?period=2026-11', cookie });
+    assert.equal(exportedCsv.status, 200);
+    assert.match(exportedCsv.headers['content-disposition'], /attachment; filename="rs-ge-ledger-2026-11.csv"/);
+    assert.match(exportedCsv.body, /Новый контракт/);
+    const exportedXlsx = await request(app, { url: '/ledger/export.xlsx?period=2026-11', cookie });
+    assert.equal(exportedXlsx.status, 200);
+    assert.equal(exportedXlsx.buffer.subarray(0, 2).toString(), 'PK');
+
+    const repeated = await request(app, { method: 'POST', url: '/ledger/import/preview', cookie,
+        requestHeaders: { 'content-type': `multipart/form-data; boundary=${boundary}` }, body: upload });
+    assert.equal(repeated.status, 303);
+    const duplicatePreview = await request(app, { url: '/ledger/import', cookie });
+    assert.match(duplicatePreview.body, /Дубликатов<\/span><strong>1<\/strong>/);
+    assert.match(duplicatePreview.body, /Новых доходов для записи нет/);
+    assert.equal((await repository.getAllRecords()).length, 1);
 });

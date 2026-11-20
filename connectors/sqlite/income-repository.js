@@ -217,6 +217,34 @@ function createSqliteIncomeRepository({ filePath = config.storage.sqlitePath, no
         return { added: true, id, message: 'Доход записан в локальный журнал.' };
     });
 
+    const addIncomeBatch = db.transaction((records) => {
+        if (!Array.isArray(records) || !records.length || records.length > 1000) {
+            throw storageError('Некорректное количество записей для импорта.', 'IMPORT_INVALID_BATCH');
+        }
+        const ids = [];
+        for (const record of records) {
+            const target = parseRecordPeriod(record.date);
+            if (!target) throw storageError('Некорректная дата дохода.', 'IMPORT_INVALID_DATE');
+            const locked = getAllRecordsSync().some((existing) => {
+                if (existing.recordType !== RECORD_TYPES.INCOME) return false;
+                const period = parseRecordPeriod(existing.date);
+                if (period?.year !== target.year) return false;
+                const filed = ['sent', 'подана', 'გაგზავნილი'].includes(String(existing.status).trim().toLocaleLowerCase('ru-RU'));
+                return (period.month >= target.month && filed) ||
+                    (period.month === target.month && Boolean(existing.reconciliationStatus || existing.rsPaymentId));
+            });
+            if (locked) throw storageError('Период уже подан или сверен. Импорт остановлен.', 'IMPORT_PERIOD_LOCKED');
+            assertUnique(record);
+            const at = timestamp();
+            const result = insertLedger.run(null, 'income', 'file_import', null, at, at);
+            const id = Number(result.lastInsertRowid);
+            writeIncome(id, record);
+            insertEvent.run(id, 'imported_from_file', null, JSON.stringify(record), at);
+            ids.push(id);
+        }
+        return { imported: ids.length, ids };
+    });
+
     const updateIncome = db.transaction(({ id, expectedVersion, record }) => {
         assertEditable(id, expectedVersion);
         assertUnique(record, Number(id));
@@ -359,6 +387,7 @@ function createSqliteIncomeRepository({ filePath = config.storage.sqlitePath, no
         getMonthlySummary: async (year, month) => monthlySummary(year, month),
         getYearlySummary: async (year, throughMonth) => yearlySummary(year, throughMonth),
         addIncomeRecord: async (record) => addIncome(record),
+        addIncomeRecords: async (records) => addIncomeBatch(records),
         updateIncomeRecord: async (input) => updateIncome(input),
         deleteIncomeRecord: async (input) => deleteIncome(input),
         applyPaymentReconciliationPlan: async (plan) => applyPlan(plan),
