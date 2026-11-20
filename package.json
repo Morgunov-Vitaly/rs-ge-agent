@@ -1,6 +1,6 @@
 {
   "name": "rs-ge-agent",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "AI agent for rs.ge automation",
   "license": "AGPL-3.0-only",
   "repository": {
@@ -20,12 +20,15 @@
     "cleanup": "node scripts/cleanup.js",
     "web:password": "node scripts/hash-web-password.js",
     "web:preview": "node scripts/preview-web.js",
+    "storage:preview": "node scripts/migrate-sheets-to-sqlite.js",
+    "storage:import": "node scripts/migrate-sheets-to-sqlite.js --apply",
     "format-sheet": "node scripts/format-sheet.js",
     "check:syntax": "node scripts/check-syntax.js",
     "check:secrets": "node scripts/check-secrets.js",
     "check": "npm run check:syntax && npm run check:secrets"
   },
   "dependencies": {
+    "better-sqlite3": "^13.2.0",
     "dotenv": "^16.4.5",
     "googleapis": "^144.0.0",
     "playwright": "^1.42.0",

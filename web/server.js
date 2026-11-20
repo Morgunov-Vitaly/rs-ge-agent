@@ -4,9 +4,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 const { config: defaultConfig, assertConfig } = require('../config');
-const { createGoogleSheetsIncomeRepository } = require('../connectors/google-sheets/income-repository');
+const { createIncomeRepository } = require('../connectors/income-repository');
 const { createRsGeBrowserClient } = require('../connectors/rsge/browser-client');
 const { getPreviousReportPeriod, isValidReportPeriod } = require('../domain/reporting-period');
+const { parseRecordPeriod } = require('../domain/dates');
 const { checkSubmissionPeriod } = require('../domain/small-business');
 const { executeModuleAction } = require('../core/action-contract');
 const smallBusinessModule = require('../modules/small-business/manifest');
@@ -17,6 +18,8 @@ const { executeAccountCheck } = require('../workflows/account-check');
 const { loadDashboard } = require('./dashboard');
 const { createOperationManager } = require('./operations');
 const { buildIncomePreview, incomeFingerprint, incomeIdempotencyKey } = require('../workflows/income-entry');
+const { buildIncomeMaintenancePreview, previewFingerprint: maintenanceFingerprint,
+    idempotencyKey: maintenanceIdempotencyKey } = require('../workflows/income-maintenance');
 const {
     createOneTimeTokenStore,
     createRateLimiter,
@@ -25,7 +28,8 @@ const {
     setSecurityHeaders,
     verifyPassword
 } = require('./security');
-const { dashboardView, errorView, incomeView, loginView, operationView } = require('./views');
+const { dashboardView, errorView, incomeView, ledgerEditView, ledgerPreviewView,
+    ledgerView, loginView, operationView } = require('./views');
 
 const ASSETS = Object.freeze({
     '/assets/styles.css': { file: 'styles.css', type: 'text/css; charset=utf-8' },
@@ -61,7 +65,7 @@ function parseRequestedPeriod(url, now) {
 
 function createWebApplication({
     appConfig = defaultConfig,
-    recordsRepository = createGoogleSheetsIncomeRepository(),
+    recordsRepository = null,
     loginToRsGe = playwright.loginToRsGe,
     createRsGeClient = createRsGeBrowserClient,
     accountCheck = executeAccountCheck,
@@ -70,7 +74,10 @@ function createWebApplication({
     now = () => new Date()
 } = {}) {
     assertConfig(appConfig, ['web']);
+    const ownsRepository = !recordsRepository;
+    recordsRepository ||= createIncomeRepository({ appConfig });
     const secureCookies = appConfig.web.secureCookies;
+    const storageDriver = recordsRepository.driver || appConfig.storage.driver;
     const spreadsheetUrl = /^[A-Za-z0-9_-]+$/.test(appConfig.google.spreadsheetId)
         ? `https://docs.google.com/spreadsheets/d/${appConfig.google.spreadsheetId}/edit`
         : '';
@@ -83,6 +90,7 @@ function createWebApplication({
     const loginCsrfTokens = createOneTimeTokenStore({ ttlMs: 10 * 60 * 1000 });
     const pendingIncome = new Map();
     const savedIncome = new Map();
+    const pendingMaintenance = new Map();
     let incomeWriteInProgress = false;
     const operations = createOperationManager({
         loginToRsGe,
@@ -101,6 +109,9 @@ function createWebApplication({
         }
         for (const [sessionId, item] of savedIncome) {
             if (Date.now() - item.createdAt > 10 * 60 * 1000) savedIncome.delete(sessionId);
+        }
+        for (const [sessionId, item] of pendingMaintenance) {
+            if (Date.now() - item.createdAt > 10 * 60 * 1000) pendingMaintenance.delete(sessionId);
         }
     }, 5 * 60 * 1000);
     cleanupTimer.unref();
@@ -173,6 +184,7 @@ function createWebApplication({
             sessions.destroy(request);
             pendingIncome.delete(session.id);
             savedIncome.delete(session.id);
+            pendingMaintenance.delete(session.id);
             return redirect(response, '/login', { 'Set-Cookie': sessions.clearCookie });
         }
 
@@ -180,19 +192,19 @@ function createWebApplication({
             if (url.searchParams.get('status') === 'saved') {
                 const saved = savedIncome.get(session.id);
                 if (saved && Date.now() - saved.createdAt <= 10 * 60 * 1000) {
-                    return send(response, 200, incomeView({ session, saved: saved.preview, now: now() }));
+                    return send(response, 200, incomeView({ session, saved: saved.preview, now: now(), storageDriver }));
                 }
                 return redirect(response, '/income');
             }
             if (url.searchParams.get('edit') === '1') {
                 const previous = pendingIncome.get(session.id);
                 pendingIncome.delete(session.id);
-                return send(response, 200, incomeView({ session, input: previous?.rawInput, now: now() }));
+                return send(response, 200, incomeView({ session, input: previous?.rawInput, now: now(), storageDriver }));
             }
             const pending = pendingIncome.get(session.id);
             const current = pending && Date.now() - pending.createdAt <= 10 * 60 * 1000 ? pending : null;
             if (!current) pendingIncome.delete(session.id);
-            return send(response, 200, incomeView({ session, pending: current, now: now() }));
+            return send(response, 200, incomeView({ session, pending: current, now: now(), storageDriver }));
         }
 
         if (request.method === 'POST' && url.pathname === '/income/preview') {
@@ -204,7 +216,7 @@ function createWebApplication({
                 pendingIncome.set(session.id, { rawInput, preview, token: crypto.randomBytes(24).toString('base64url'), createdAt: Date.now() });
                 return redirect(response, '/income');
             } catch (error) {
-                return send(response, 400, incomeView({ session, input: rawInput, error: error.message, now: now() }));
+                return send(response, 400, incomeView({ session, input: rawInput, error: error.message, now: now(), storageDriver }));
             }
         }
 
@@ -214,10 +226,10 @@ function createWebApplication({
             const pending = pendingIncome.get(session.id);
             if (!pending || Date.now() - pending.createdAt > 10 * 60 * 1000 || form.token !== pending.token) {
                 pendingIncome.delete(session.id);
-                return send(response, 409, incomeView({ session, error: 'Предпросмотр устарел. Введите данные заново.', now: now() }));
+                return send(response, 409, incomeView({ session, error: 'Предпросмотр устарел. Введите данные заново.', now: now(), storageDriver }));
             }
             if (incomeWriteInProgress) {
-                return send(response, 409, incomeView({ session, pending, error: 'Другая запись уже сохраняется. Повторите после ее завершения.', now: now() }));
+                return send(response, 409, incomeView({ session, pending, error: 'Другая запись уже сохраняется. Повторите после ее завершения.', now: now(), storageDriver }));
             }
             pendingIncome.delete(session.id);
             incomeWriteInProgress = true;
@@ -229,7 +241,7 @@ function createWebApplication({
                 savedIncome.set(session.id, { preview: result.preview, createdAt: Date.now() });
                 return redirect(response, '/income?status=saved');
             } catch (error) {
-                return send(response, 409, incomeView({ session, input: pending.rawInput, error: error.message, now: now() }));
+                return send(response, 409, incomeView({ session, input: pending.rawInput, error: error.message, now: now(), storageDriver }));
             } finally {
                 incomeWriteInProgress = false;
             }
@@ -245,7 +257,7 @@ function createWebApplication({
                     month: period.month,
                     now: currentDate
                 });
-                return send(response, 200, dashboardView({ session, dashboard, now: currentDate, submissionEnabled: appConfig.rsGe.enableSubmission, spreadsheetUrl }));
+                return send(response, 200, dashboardView({ session, dashboard, now: currentDate, submissionEnabled: appConfig.rsGe.enableSubmission, spreadsheetUrl, storageDriver }));
             } catch (error) {
                 appLogger.error('Web dashboard failed:', error);
                 const fallback = {
@@ -257,11 +269,134 @@ function createWebApplication({
                 return send(response, 503, dashboardView({
                     session,
                     dashboard: fallback,
-                    error: 'Не удалось прочитать Google Sheets. Проверьте подключение и повторите попытку.',
+                    error: 'Не удалось прочитать журнал учета. Проверьте хранилище и повторите попытку.',
                     now: currentDate,
                     submissionEnabled: appConfig.rsGe.enableSubmission,
-                    spreadsheetUrl
+                    spreadsheetUrl,
+                    storageDriver
                 }));
+            }
+        }
+
+        if (request.method === 'GET' && url.pathname === '/ledger') {
+            const allPeriods = !url.searchParams.has('period') || url.searchParams.get('period') === 'all';
+            const selected = allPeriods ? null : parseRequestedPeriod(url, now());
+            const page = Math.max(1, Math.min(100000, Number(url.searchParams.get('page')) || 1));
+            try {
+                const records = await recordsRepository.getAllRecords();
+                const filtered = records.filter((record) => {
+                    if (allPeriods) return true;
+                    const date = parseRecordPeriod(record.recordType === 'Платёж RS.GE'
+                        ? record.rsPaymentDate : record.date);
+                    return date?.year === selected.year && date.month === selected.month;
+                }).sort((left, right) => {
+                    const leftDate = parseRecordPeriod(left.date || left.rsPaymentDate)?.date.getTime() || 0;
+                    const rightDate = parseRecordPeriod(right.date || right.rsPaymentDate)?.date.getTime() || 0;
+                    return rightDate - leftDate || (right.id || right.rowIndex) - (left.id || left.rowIndex);
+                });
+                const incomeRecords = filtered.filter((record) => !record.recordType || record.recordType === 'Доход');
+                const totals = {
+                    incomeGel: incomeRecords.reduce((sum, record) => sum + Number(record.amountGel || 0), 0),
+                    taxGel: incomeRecords.reduce((sum, record) => sum + Number(record.taxGel || 0), 0),
+                    incomeCount: incomeRecords.length,
+                    portalCount: filtered.length - incomeRecords.length
+                };
+                const totalPages = Math.max(1, Math.ceil(filtered.length / 50));
+                const currentPage = Math.min(page, totalPages);
+                const notice = url.searchParams.get('notice') === 'updated' ? 'Запись обновлена.'
+                    : url.searchParams.get('notice') === 'deleted' ? 'Запись удалена из учета; история изменений сохранена.' : '';
+                return send(response, 200, ledgerView({ session, rows: filtered.slice((currentPage - 1) * 50, currentPage * 50),
+                    year: selected?.year, month: selected?.month, allPeriods, page: currentPage,
+                    totalPages, totals, storageDriver, notice, now: now() }));
+            } catch (error) {
+                appLogger.error('Web ledger failed:', error);
+                return send(response, 503, errorView({ session, statusCode: 503,
+                    title: 'Журнал недоступен', message: 'Не удалось прочитать записи. Проверьте подключение к хранилищу.' }));
+            }
+        }
+
+        const ledgerActionMatch = url.pathname.match(/^\/ledger\/(\d+)\/(edit|delete|preview|confirm)$/);
+        if (ledgerActionMatch) {
+            const id = Number(ledgerActionMatch[1]);
+            const action = ledgerActionMatch[2];
+            if (storageDriver !== 'sqlite' || !Number.isSafeInteger(id)) {
+                return send(response, 409, errorView({ session, statusCode: 409,
+                    title: 'Редактирование недоступно', message: 'Сначала выполните проверенный импорт в локальный журнал.' }));
+            }
+            if (request.method === 'GET' && action === 'edit') {
+                const record = await recordsRepository.getRecord(id);
+                if (!record || record.recordType !== 'Доход') return send(response, 404, errorView({ session, statusCode: 404,
+                    title: 'Запись не найдена', message: 'Откройте журнал и выберите существующее поступление.' }));
+                return send(response, 200, ledgerEditView({ session, record, now: now() }));
+            }
+            if (request.method === 'GET' && action === 'delete') {
+                try {
+                    const preview = await buildIncomeMaintenancePreview({ recordsRepository, id,
+                        intent: 'delete', convertToGel, now: now() });
+                    pendingMaintenance.set(session.id, { preview, rawInput: {},
+                        token: crypto.randomBytes(24).toString('base64url'), createdAt: Date.now() });
+                    return redirect(response, `/ledger/${id}/preview`);
+                } catch (error) {
+                    return send(response, 409, errorView({ session, statusCode: 409,
+                        title: 'Удаление недоступно', message: error.message }));
+                }
+            }
+            if (request.method === 'POST' && action === 'preview') {
+                const form = await readForm(request);
+                if (form.csrf !== session.csrfToken) return send(response, 403, errorView({ session, statusCode: 403,
+                    title: 'Запрос отклонен', message: 'Обновите страницу и повторите действие.' }));
+                const record = await recordsRepository.getRecord(id);
+                if (!record) return send(response, 404, errorView({ session, statusCode: 404,
+                    title: 'Запись не найдена', message: 'Обновите журнал.' }));
+                const rawInput = { date: form.date, amount: form.amount, currency: form.currency,
+                    description: form.description, paymentDate: form.paymentDate };
+                try {
+                    const preview = await buildIncomeMaintenancePreview({ recordsRepository, id,
+                        intent: 'edit', input: rawInput, convertToGel, now: now() });
+                    pendingMaintenance.set(session.id, { preview, rawInput,
+                        token: crypto.randomBytes(24).toString('base64url'), createdAt: Date.now() });
+                    return redirect(response, `/ledger/${id}/preview`);
+                } catch (error) {
+                    return send(response, 400, ledgerEditView({ session, record, input: rawInput,
+                        error: error.message, now: now() }));
+                }
+            }
+            if (request.method === 'GET' && action === 'preview') {
+                const pending = pendingMaintenance.get(session.id);
+                if (!pending || pending.preview.id !== id || Date.now() - pending.createdAt > 10 * 60 * 1000) {
+                    return send(response, 409, errorView({ session, statusCode: 409,
+                        title: 'Предпросмотр устарел', message: 'Откройте запись заново.' }));
+                }
+                return send(response, 200, ledgerPreviewView({ session, pending }));
+            }
+            if (request.method === 'POST' && action === 'confirm') {
+                const form = await readForm(request);
+                if (form.csrf !== session.csrfToken) return send(response, 403, errorView({ session, statusCode: 403,
+                    title: 'Запрос отклонен', message: 'Обновите страницу и повторите действие.' }));
+                const pending = pendingMaintenance.get(session.id);
+                if (!pending || pending.preview.id !== id || pending.token !== form.token ||
+                    Date.now() - pending.createdAt > 10 * 60 * 1000) {
+                    return send(response, 409, errorView({ session, statusCode: 409,
+                        title: 'Подтверждение устарело', message: 'Проверьте актуальные данные заново.' }));
+                }
+                if (incomeWriteInProgress) return send(response, 409, errorView({ session, statusCode: 409,
+                    title: 'Запись выполняется', message: 'Дождитесь завершения другого изменения.' }));
+                pendingMaintenance.delete(session.id);
+                incomeWriteInProgress = true;
+                const intent = pending.preview.after ? 'edit' : 'delete';
+                try {
+                    await executeModuleAction(smallBusinessModule, intent === 'edit' ? 'edit-income' : 'delete-income', {
+                        recordsRepository, id, rawInput: pending.rawInput, convertToGel,
+                        confirmedFingerprint: maintenanceFingerprint(pending.preview), now: now()
+                    }, { confirmed: true, idempotencyKey: maintenanceIdempotencyKey(pending.preview) });
+                    const date = pending.preview.before.date;
+                    return redirect(response, `/ledger?period=${date.slice(0, 7)}&notice=${intent === 'edit' ? 'updated' : 'deleted'}`);
+                } catch (error) {
+                    return send(response, 409, errorView({ session, statusCode: 409,
+                        title: 'Изменение не сохранено', message: error.message }));
+                } finally {
+                    incomeWriteInProgress = false;
+                }
             }
         }
 
@@ -414,6 +549,7 @@ function createWebApplication({
         },
         close() {
             clearInterval(cleanupTimer);
+            if (ownsRepository && typeof recordsRepository.close === 'function') recordsRepository.close();
         }
     };
 }

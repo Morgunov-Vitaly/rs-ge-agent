@@ -27,7 +27,7 @@ function createPreview({ year, month, expectedDraft, draft }) {
     }
     if (!declarationFieldsMatch(draft.fields, expectedDraft.fields)) {
         throw workflowError(
-            'Черновик RS.GE отличается от Google Sheets. Отправка заблокирована.',
+            'Черновик RS.GE отличается от журнала учета. Отправка заблокирована.',
             'DECLARATION_DRAFT_CONFLICT'
         );
     }

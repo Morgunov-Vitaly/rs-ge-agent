@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:24-bookworm-slim
 
 # Устанавливаем только минимальные системные библиотеки для запуска Chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -36,6 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxss1 \
     libxtst6 \
     ca-certificates \
+    python3 \
+    make \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Указываем Playwright использовать установленный системный Chromium из репозитория Debian
@@ -46,7 +49,7 @@ ENV TZ=Asia/Tbilisi
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 COPY . .
 

@@ -48,7 +48,7 @@ async function buildIncomePreview({ input, convertToGel, recordsRepository, now 
         String(record.currency || '').toUpperCase() === source.currency &&
         Math.abs(record.amountOriginal - source.amount) < 0.001
     ));
-    if (duplicate) throw incomeError('Такая запись уже есть в Google Sheets.', 'INCOME_DUPLICATE');
+    if (duplicate) throw incomeError('Такая запись уже есть в журнале.', 'INCOME_DUPLICATE');
 
     const period = parseRecordPeriod(source.date);
     const yearSummary = await recordsRepository.getYearlySummary(period.year, period.month);

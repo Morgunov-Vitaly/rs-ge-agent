@@ -132,6 +132,7 @@ function buildPaymentReconciliationPreview({ records, reconciliation, reconciled
             const record = recordByRow.get(rowIndex);
             if (!record) return [];
             const desired = desiredUpdate(item, rowIndex, reconciledAt);
+            if (Number.isSafeInteger(record.version)) desired.expectedVersion = record.version;
             return sameReconciliationState(record, desired) ? [] : [desired];
         })
     ));
@@ -178,17 +179,17 @@ function buildPaymentReconciliationPreview({ records, reconciliation, reconciled
     };
 }
 
-function formatPaymentReconciliationPreview(preview) {
+function formatPaymentReconciliationPreview(preview, storageDriver = 'sheets') {
     const { summary } = preview;
     const lines = [
-        'PREVIEW синхронизации с Google Sheets',
+        `PREVIEW записи сверки в ${storageDriver === 'sqlite' ? 'локальный журнал' : 'Google Sheets'}`,
         '',
         `Класс риска: ${preview.risk}`,
         `Точные совпадения: ${summary.matched}`,
         `Расхождения дат: ${summary.dateMismatches}`,
         `Расхождения сумм: ${summary.amountMismatches}`,
         `Не найдено на RS.GE: ${summary.missingOnPortal}`,
-        `Строк таблицы будет дополнено: ${summary.rowsToUpdate}`,
+        `Строк журнала будет дополнено: ${summary.rowsToUpdate}`,
         `Несопоставленных платежей будет добавлено: ${summary.portalRowsToInsert}`,
     ];
     if (summary.existingPortalRows) {
@@ -196,7 +197,7 @@ function formatPaymentReconciliationPreview(preview) {
     }
     lines.push(
         '',
-        'Исходные колонки A–I не изменяются. Служебные платежи не участвуют в расчёте дохода и налога.',
+        (storageDriver === 'sqlite' ? 'Исходные доходы не изменяются.' : 'Исходные колонки A–I не изменяются.') + ' Служебные платежи не участвуют в расчёте дохода и налога.',
         'Изменения будут записаны только после подтверждения.'
     );
     return lines.join('\n');
@@ -225,7 +226,7 @@ async function executePaymentReconciliationSync({
 
         if (preview.fingerprint !== previewFingerprint) {
             const error = new Error(
-                'Данные Google Sheets или RS.GE изменились после preview.'
+                'Данные журнала или RS.GE изменились после preview.'
             );
             error.code = 'PAYMENT_RECONCILIATION_STALE';
             error.refreshedPreview = preview;

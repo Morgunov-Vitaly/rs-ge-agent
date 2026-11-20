@@ -13,10 +13,9 @@ require('dotenv').config();
 const logger = require('./logger');
 const nbg = require('./nbg');
 const rules = require('./rules');
-const sheets = require('./sheets');
 const playwright = require('./playwright');
 const { config, assertConfig } = require('../config');
-const { createGoogleSheetsIncomeRepository } = require('../connectors/google-sheets/income-repository');
+const { createIncomeRepository } = require('../connectors/income-repository');
 const { createRsGeBrowserClient } = require('../connectors/rsge/browser-client');
 const { executePaymentReconciliation } = require('../workflows/payment-reconciliation');
 const { executeAccountCheck } = require('../workflows/account-check');
@@ -42,7 +41,9 @@ const { getPreviousReportPeriod } = require('../domain/reporting-period');
 assertConfig(config, ['telegram', 'submission']);
 const BOT_TOKEN = config.telegram.token;
 const ALLOWED_CHAT_ID = config.telegram.allowedChatId;
-const recordsRepository = createGoogleSheetsIncomeRepository();
+const recordsRepository = createIncomeRepository();
+const storageLabel = recordsRepository.driver === 'sqlite' ? 'локальный журнал' : 'Google Sheets';
+const storageLocation = recordsRepository.driver === 'sqlite' ? 'локальный журнал' : 'Google Таблицу';
 
 // Долгие браузерные операции запускаются в фоне, поэтому Telegram handler
 // не должен ждать SMS-код и блокировать получение следующих update.
@@ -363,7 +364,7 @@ async function requestReconciliationConfirmation(ctx, preview) {
 
     try {
         await ctx.reply(
-            formatPaymentReconciliationPreview(preview),
+            formatPaymentReconciliationPreview(preview, recordsRepository.driver),
             Markup.inlineKeyboard([
                 [Markup.button.callback(
                     `🟢 Применить: ${preview.summary.rowsToUpdate} обновить, ` +
@@ -457,14 +458,14 @@ async function runFillFlow(ctx) {
         }
 
         const comparison = draftComparison.valuesMatch
-            ? '✅ Данные совпадают с Google Sheets.'
-            : '⚠️ Данные черновика отличаются от Google Sheets. Не отправляйте декларацию до проверки.';
+            ? `✅ Данные совпадают с ${storageLabel}.`
+            : `⚠️ Данные черновика отличаются от ${storageLabel}. Не отправляйте декларацию до проверки.`;
         const statusComparison = draftComparison.statusMismatch
-            ? '⚠️ В таблице указано «подана», но на RS.GE найдена сохраненная, не отправленная декларация.'
+            ? '⚠️ В журнале указано «подана», но на RS.GE найдена сохраненная, не отправленная декларация.'
             : '';
         const paymentInfo = summary.isPaid
-            ? `Оплата по таблице: ${summary.paymentDate}`
-            : 'Оплата по таблице не отмечена';
+            ? `Оплата по журналу: ${summary.paymentDate}`
+            : 'Оплата по журналу не отмечена';
 
         const declarationSent = draftComparison.rsStatusIsSent;
         const declarationLabel = declarationSent ? 'Декларация' : 'Черновик';
@@ -474,7 +475,7 @@ async function runFillFlow(ctx) {
         const caption =
             `${declarationLabel} за ${String(reportMonth).padStart(2, '0')}.${reportYear}\n` +
             `Статус RS.GE: ${draft.status || 'сохранен'}\n` +
-            `Статус таблицы: ${summary.status}\n` +
+            `Статус журнала: ${summary.status}\n` +
             `${paymentInfo}\n` +
             `Графа 15: ${draft.fields[15].toFixed(2)} GEL\n` +
             `Графа 20: ${draft.fields[20].toFixed(2)} GEL\n` +
@@ -616,7 +617,7 @@ async function runSubmissionFlow(ctx) {
                     `Доход: ${preview.fields[20].toFixed(2)} GEL\n` +
                     `Налог: ${preview.fields[26].toFixed(2)} GEL\n\n` +
                     'Screenshot, PDF и SHA-256 сохранены в evidence-хранилище. ' +
-                    'Google Sheets на этом шаге не изменялась.'
+                    (recordsRepository.driver === 'sqlite' ? 'Локальный журнал на этом шаге не изменялся.' : 'Google Sheets на этом шаге не изменялась.')
             }
         );
         await ctx.replyWithDocument({
@@ -671,7 +672,7 @@ async function runPaymentsFlow(ctx) {
         await replyLongText(ctx, result.report);
         if (result.needsReconciliation) {
             await ctx.reply(
-                'Записать найденные расхождения в отдельные колонки Google Sheets?',
+                `Записать найденные расхождения в ${storageLabel}?`,
                 Markup.inlineKeyboard([
                     [Markup.button.callback('🧩 Записать расхождения', 'offer_reconcile')]
                 ])
@@ -704,7 +705,7 @@ async function runReconciliationFlow(ctx) {
         loginResult = await playwright.loginToRsGe(
             (screenshotBuffer) => requestSmsCode(ctx, screenshotBuffer)
         );
-        await ctx.reply('🎉 Вход выполнен. Готовлю preview сверки RS.GE и Google Sheets...');
+        await ctx.reply(`🎉 Вход выполнен. Готовлю preview сверки RS.GE и ${storageLabel}...`);
 
         const rsGeClient = createRsGeBrowserClient(loginResult.page);
         const reconciliationResult = await executePaymentReconciliation({
@@ -722,7 +723,7 @@ async function runReconciliationFlow(ctx) {
             preview.summary.portalRowsToInsert === 0
         ) {
             await ctx.reply(
-                '✅ Данные сверки в Google Sheets уже актуальны. Повторная запись не требуется.'
+                `✅ Данные сверки в ${storageLabel} уже актуальны. Повторная запись не требуется.`
             );
             return;
         }
@@ -757,16 +758,16 @@ async function runReconciliationFlow(ctx) {
 
                 preview = error.refreshedPreview;
                 await ctx.reply(
-                    '⚠️ RS.GE или Google Sheets вернули обновлённые данные. ' +
+                    `⚠️ RS.GE или ${storageLabel} вернули обновлённые данные. ` +
                     'Ничего не записано. Проверьте новый preview и подтвердите его повторно.'
                 );
             }
         }
         await ctx.reply(
-            '✅ Сверка записана в Google Sheets.\n' +
+            `✅ Сверка записана в ${storageLabel}.\n` +
             `Дополнено существующих строк: ${result.writeResult.updatedRows}.\n` +
             `Добавлено несопоставленных платежей RS.GE: ${result.writeResult.insertedRows}.\n` +
-            'Исходные колонки A–I не изменялись.'
+            (recordsRepository.driver === 'sheets' ? 'Исходные колонки A–I не изменялись.' : 'Исходные доходы не изменялись.')
         );
     } catch (err) {
         logger.error('Ошибка при запуске /reconcile:', err);
@@ -801,7 +802,7 @@ async function startReconciliationFlow(ctx) {
     sessionState.activeOperation = 'reconcile';
     await ctx.reply(
         '🧩 Готовлю расхождения для записи. Сначала будет показан preview; ' +
-        'до подтверждения Google Sheets не изменяется.'
+        `до подтверждения ${storageLabel} не изменяется.`
     );
 
     setImmediate(() => {
@@ -863,7 +864,7 @@ bot.start(async (ctx) => {
     const welcome = `👋 Привет! Я твой налоговый агент по Грузии (ИП, малый бизнес 1%).\n\n` +
         `Выбери нужное действие в меню снизу:\n\n` +
         `• ➕ *Добавить доход* — пошаговый ввод нового поступления (сумма, валюта, дата)\n` +
-        `• 📊 *Статус за месяц* — сводка из Google Таблицы, налог 1% и сроки\n` +
+        `• 📊 *Статус за месяц* — сводка из учета, налог 1% и сроки\n` +
         `• 📝 *Подготовить декларацию* — preview и подтверждаемое сохранение черновика на rs.ge\n` +
         submissionMenuText +
         `• 💳 *Оплатить налог* — ссылка и реквизиты Казначейства\n` +
@@ -916,7 +917,7 @@ bot.hears(['❓ Помощь', '/help'], async (ctx) => {
         : '';
     const helpText = `📖 *Как пользоваться ботом:*\n\n` +
         `1. *➕ Добавить доход (/add)*\n` +
-        `Пошаговый мастер запросит сумму, валюту (USD/EUR/GEL), дату поступления и назначение. Бот сам обратится к Нацбанку Грузии (NBG), пересчитает сумму в лари по курсу на этот день и добавит запись в твою Google Таблицу.\n\n` +
+        `Пошаговый мастер запросит сумму, валюту (USD/EUR/GEL), дату поступления и назначение. Бот сам обратится к Нацбанку Грузии (NBG), пересчитает сумму в лари по курсу на этот день и добавит запись в ${storageLocation}.\n\n` +
         `2. *📊 Статус за месяц (/status)*\n` +
         `Показывает доходы из таблицы, налог 1% и подсказывает, когда открыто окно подачи.\n\n` +
         `3. *📝 Подготовить декларацию (/fill)*\n` +
@@ -926,14 +927,14 @@ bot.hears(['❓ Помощь', '/help'], async (ctx) => {
         `Ссылка на официальный шлюз rs.ge и реквизиты Казначейства (101001000).\n\n` +
         `${config.rsGe.enableSubmission ? '6' : '5'}. *🔍 Проверить оплаты (/payments)*\n` +
         `Одним входом проверяет декларацию за последний период, фактическую оплату, задолженность и всю историю платежей. ` +
-        `Если появились новые расхождения, бот предложит записать их в таблицу после отдельного подтверждения.`;
+        `Если появились новые расхождения, бот предложит записать их в журнал после отдельного подтверждения.`;
 
     await ctx.replyWithMarkdown(helpText);
 });
 
 // /status или кнопка "📊 Статус за месяц"
 bot.hears(['📊 Статус за месяц', '/status'], async (ctx) => {
-    await ctx.reply('⏳ Запрашиваю данные из Google Таблицы...');
+    await ctx.reply(`⏳ Запрашиваю данные из ${storageLabel}...`);
 
     try {
         const now = new Date();
@@ -948,15 +949,15 @@ bot.hears(['📊 Статус за месяц', '/status'], async (ctx) => {
         }
 
         const periodInfo = rules.checkSubmissionPeriod(reportYear, reportMonth, now);
-        const reportSummary = await sheets.getMonthlySummary(reportYear, reportMonth);
-        const yearSummary = await sheets.getYearlySummary(reportYear, reportMonth);
-        const curSummary = await sheets.getMonthlySummary(curYear, curMonth);
+        const reportSummary = await recordsRepository.getMonthlySummary(reportYear, reportMonth);
+        const yearSummary = await recordsRepository.getYearlySummary(reportYear, reportMonth);
+        const curSummary = await recordsRepository.getMonthlySummary(curYear, curMonth);
         const paymentStatus = reportSummary.isPaid
             ? `оплачен ${reportSummary.paymentDate}`
             : 'оплата не отмечена';
 
         let msg = `📅 *Отчетный период: ${String(reportMonth).padStart(2, '0')}.${reportYear}*\n\n` +
-            `• Записей в таблице: ${reportSummary.recordsCount}\n` +
+            `• Записей в журнале: ${reportSummary.recordsCount}\n` +
             `• Доход: *${reportSummary.totalIncomeGel.toFixed(2)} GEL*\n` +
             `• Налог 1%: *${reportSummary.totalTaxGel.toFixed(2)} GEL*\n` +
             `• Статус: _${reportSummary.status}_\n` +
@@ -984,12 +985,12 @@ bot.hears(['💳 Оплатить налог', '/pay'], async (ctx) => {
             reportYear -= 1;
         }
 
-        const reportSummary = await sheets.getMonthlySummary(reportYear, reportMonth);
+        const reportSummary = await recordsRepository.getMonthlySummary(reportYear, reportMonth);
         if (reportSummary.isPaid) {
             return ctx.reply(
                 `✅ Налог за ${String(reportMonth).padStart(2, '0')}.${reportYear} уже отмечен оплаченным ` +
                 `${reportSummary.paymentDate}. Повторную оплату не формирую.\n` +
-                `Сумма по таблице: ${reportSummary.totalTaxGel.toFixed(2)} GEL.`
+                `Сумма по журналу: ${reportSummary.totalTaxGel.toFixed(2)} GEL.`
             );
         }
 
@@ -1113,7 +1114,9 @@ bot.action(/^reconcile_cancel:(.+)$/, async (ctx) => {
     await ctx.answerCbQuery(cancelled ? 'Синхронизация отменена' : 'Это подтверждение уже недействительно');
     if (cancelled) {
         await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => undefined);
-        await ctx.reply('Синхронизация отменена. Google Sheets не изменена.', getMainMenu());
+        await ctx.reply(recordsRepository.driver === 'sqlite'
+            ? 'Синхронизация отменена. Локальный журнал не изменялся.'
+            : 'Синхронизация отменена. Google Sheets не изменена.', getMainMenu());
     }
 });
 
@@ -1134,7 +1137,7 @@ bot.hears(['🔍 Проверить оплаты', '✅ Проверить пе�
     sessionState.activeOperation = 'payments';
     await ctx.reply(
         '🔍 Проверяю декларацию, оплату, задолженность и историю платежей RS.GE. ' +
-        'Это только чтение: данные на портале и в таблице не изменятся.'
+        'Это только чтение: данные на портале и в журнале не изменятся.'
     );
 
     // Не await: Telegram polling должен продолжать принимать SMS-код.
@@ -1229,7 +1232,7 @@ bot.on('text', async (ctx) => {
                 const converted = await nbg.convertToGel(data.amount, data.currency, data.date);
                 const tax = rules.calculateSmallBusinessTax(converted.amountGel);
 
-                const addResult = await sheets.addIncomeRecord({
+                const addResult = await recordsRepository.addIncomeRecord({
                     date: converted.date,
                     amountOriginal: converted.amountOriginal,
                     currency: converted.currency,
@@ -1241,7 +1244,7 @@ bot.on('text', async (ctx) => {
                 });
 
                 let replyMsg = addResult.added
-                    ? `✅ *Доход успешно записан в Google Таблицу!*\n\n`
+                    ? `✅ *Доход успешно записан в ${storageLocation}!*\n\n`
                     : `⚠️ *${addResult.message}*\n\n`;
 
                 replyMsg += `📅 Дата: ${converted.date}\n` +
@@ -1274,7 +1277,7 @@ bot.on('text', async (ctx) => {
             const converted = await nbg.convertToGel(rawAmount, currency, date);
             const tax = rules.calculateSmallBusinessTax(converted.amountGel);
 
-            const addResult = await sheets.addIncomeRecord({
+            const addResult = await recordsRepository.addIncomeRecord({
                 date: converted.date,
                 amountOriginal: converted.amountOriginal,
                 currency: converted.currency,
@@ -1286,7 +1289,7 @@ bot.on('text', async (ctx) => {
             });
 
             let replyMsg = addResult.added
-                ? `✅ *Доход успешно записан в Google Таблицу!*\n\n`
+                ? `✅ *Доход успешно записан в ${storageLocation}!*\n\n`
                 : `⚠️ *${addResult.message}*\n\n`;
 
             replyMsg += `📅 Дата: ${converted.date}\n` +

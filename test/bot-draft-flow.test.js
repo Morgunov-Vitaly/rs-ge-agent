@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+process.env.STORAGE_DRIVER = 'sheets';
 
 test('Telegram requires an inline confirmation before creating a draft', async () => {
     process.env.TELEGRAM_BOT_TOKEN = '999999:test-token';

@@ -29,7 +29,7 @@ function buildDeclarationDraftPreview({ year, month, summary, yearSummary }) {
     }
     if (summary.isFiled) {
         throw workflowError(
-            `В Google Sheets декларация за ${String(month).padStart(2, '0')}.${year} уже отмечена как поданная.`,
+            `В журнале декларация за ${String(month).padStart(2, '0')}.${year} уже отмечена как поданная.`,
             'DECLARATION_ALREADY_FILED'
         );
     }
@@ -45,7 +45,7 @@ function buildDeclarationDraftPreview({ year, month, summary, yearSummary }) {
     }
 
     const tax = calculateSmallBusinessTax(monthlyIncomeGel, Math.max(0, cumulativeBeforeMonth));
-    const sheetTaxGel = money(summary.totalTaxGel || 0, 'налога в таблице');
+    const sheetTaxGel = money(summary.totalTaxGel || 0, 'налога в журнале');
     const fields = Object.freeze({
         15: cumulativeIncomeGel,
         16: Number((tax.rate * 100).toFixed(2)),
@@ -59,7 +59,7 @@ function buildDeclarationDraftPreview({ year, month, summary, yearSummary }) {
     const warnings = [];
     if (Math.abs(sheetTaxGel - tax.taxAmount) > 0.02) {
         warnings.push(
-            `Налог в таблице (${sheetTaxGel.toFixed(2)} GEL) отличается от расчета по годовому лимиту ` +
+            `Налог в журнале (${sheetTaxGel.toFixed(2)} GEL) отличается от расчета по годовому лимиту ` +
             `(${tax.taxAmount.toFixed(2)} GEL). В черновик попадет расчет по ставке ${fields[16].toFixed(0)}%.`
         );
     }
@@ -133,7 +133,7 @@ async function executeDeclarationDraftCreation(input, execution = {}) {
         const currentFingerprint = getDeclarationPreviewFingerprint(preview);
         if (!previewFingerprint || currentFingerprint !== previewFingerprint) {
             throw workflowError(
-                'Данные Google Sheets изменились после preview. Запустите /fill заново и подтвердите новые суммы.',
+                'Данные журнала изменились после preview. Запустите /fill заново и подтвердите новые суммы.',
                 'DECLARATION_PREVIEW_STALE'
             );
         }

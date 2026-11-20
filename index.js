@@ -10,6 +10,8 @@
 require('dotenv').config();
 const logger = require('./services/logger');
 const sheets = require('./services/sheets');
+const { createIncomeRepository } = require('./connectors/income-repository');
+const { createDailySqliteBackup } = require('./infrastructure/sqlite-backup');
 const {
     runRetentionCleanup,
     scheduleRetentionCleanup
@@ -20,6 +22,7 @@ const { startWebServer } = require('./web/server');
 let retentionTimer;
 let webRuntime;
 let bot;
+let sqliteBackupTimer;
 
 function formatCleanupResult(result) {
     return {
@@ -30,6 +33,7 @@ function formatCleanupResult(result) {
 }
 
 async function main() {
+    assertConfig(config, ['storage']);
     if (config.telegram.enabled) assertConfig(config, ['telegram']);
     if (config.web.enabled) assertConfig(config, ['web']);
     if (!config.telegram.enabled && !config.web.enabled) {
@@ -54,13 +58,31 @@ async function main() {
         onError: (error) => logger.error('Ошибка плановой очистки runtime-файлов:', error)
     });
 
-    // Проверяем доступность Google Sheets
-    try {
-        logger.info('Подключение к Google Таблице...');
-        await sheets.initSheetHeaders();
-        logger.info('✓ Google Таблица успешно инициализирована.');
-    } catch (err) {
-        logger.error('Предупреждение по Google Таблице:', err.message);
+    if (config.storage.driver === 'sheets') {
+        try {
+            logger.info('Подключение к Google Таблице...');
+            await sheets.initSheetHeaders();
+            logger.info('✓ Google Таблица успешно инициализирована.');
+        } catch (err) {
+            logger.error('Предупреждение по Google Таблице:', err.message);
+        }
+    } else {
+        createIncomeRepository({ appConfig: config }).close();
+        logger.info('✓ Локальная SQLite база готова.');
+        try {
+            const backup = await createDailySqliteBackup({ filePath: config.storage.sqlitePath });
+            if (backup.created) logger.info('✓ Создана проверенная копия локальной базы.');
+        } catch (error) {
+            logger.error('Не удалось создать резервную копию SQLite:', error);
+            throw error;
+        }
+        sqliteBackupTimer = setInterval(() => {
+            createDailySqliteBackup({ filePath: config.storage.sqlitePath })
+                .then((backup) => {
+                    if (backup.created) logger.info('✓ Создана ежедневная копия локальной базы.');
+                })
+                .catch((error) => logger.error('Ошибка ежедневной копии SQLite:', error));
+        }, 60 * 60 * 1000);
     }
 
     if (config.telegram.enabled) {
@@ -81,6 +103,7 @@ async function main() {
     const stop = async (signal) => {
         logger.info(`Остановка (${signal})...`);
         if (retentionTimer) clearInterval(retentionTimer);
+        if (sqliteBackupTimer) clearInterval(sqliteBackupTimer);
         if (bot) bot.stop(signal);
         if (webRuntime) {
             await webRuntime.close().catch((error) => {

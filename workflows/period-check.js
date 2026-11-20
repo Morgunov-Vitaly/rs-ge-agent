@@ -33,7 +33,7 @@ function buildPeriodCheckReport(result) {
     const headline = verdict === 'closed'
         ? `✅ Период ${period} закрыт`
         : (verdict === 'portal-closed-sheet-mismatch'
-            ? `⚠️ Период ${period} закрыт на RS.GE, но таблица требует сверки`
+            ? `⚠️ Период ${period} закрыт на RS.GE, но журнал требует сверки`
             : `❌ Период ${period} требует внимания`);
     const lines = [headline, ''];
 
@@ -46,8 +46,8 @@ function buildPeriodCheckReport(result) {
             lines.push(`Регистрационный №: ${declaration.metadata.registrationNumber}`);
         }
         lines.push(
-            `Доход: RS.GE ${formatMoney(declaration.fields[20])} / таблица ${formatMoney(summary.totalIncomeGel)}`,
-            `Налог: RS.GE ${formatMoney(declaration.fields[26])} / таблица ${formatMoney(summary.totalTaxGel)}`
+            `Доход: RS.GE ${formatMoney(declaration.fields[20])} / учет ${formatMoney(summary.totalIncomeGel)}`,
+            `Налог: RS.GE ${formatMoney(declaration.fields[26])} / учет ${formatMoney(summary.totalTaxGel)}`
         );
     } else {
         lines.push('Декларация RS.GE: не найдена');
@@ -60,12 +60,12 @@ function buildPeriodCheckReport(result) {
         for (const item of periodPayments) {
             lines.push(
                 `Оплата: подтверждена ${payments.formatDate(item.portalPayment.paymentDate)} — ` +
-                `RS.GE ${formatMoney(item.portalPayment.amount)} / таблица ${formatMoney(item.expectedAmount)}, ` +
+                `RS.GE ${formatMoney(item.portalPayment.amount)} / учет ${formatMoney(item.expectedAmount)}, ` +
                 `разница ${item.amountDelta > 0 ? '+' : ''}${item.amountDelta.toFixed(2)} GEL`
             );
         }
     } else if (periodPayments.length === 0) {
-        lines.push('Оплата: в таблице нет даты оплаты или платеж не удалось связать с периодом');
+        lines.push('Оплата: в журнале нет даты оплаты или платеж не удалось связать с периодом');
     } else {
         lines.push('Оплата: платеж найден с расхождением или не найден на RS.GE');
     }
@@ -82,26 +82,26 @@ function buildPeriodCheckReport(result) {
     const sheetPayment = summary.isPaid
         ? `оплата отмечена ${summary.paymentDate || '(дата не указана)'}`
         : 'оплата не отмечена';
-    lines.push(`Google Sheets: ${summary.status || 'статус не указан'}; ${sheetPayment}`);
+    lines.push(`Журнал учета: ${summary.status || 'статус не указан'}; ${sheetPayment}`);
 
     const warnings = [];
     if (!declaration.exists) {
         warnings.push(summary.isFiled
-            ? 'Автоматическая проверка не нашла декларацию на RS.GE, хотя в Google Sheets она отмечена как поданная.'
+            ? 'Автоматическая проверка не нашла декларацию на RS.GE, хотя в журнале она отмечена как поданная.'
             : 'Автоматическая проверка не нашла декларацию за выбранный период на RS.GE.');
     } else if (!declarationComparison.rsStatusIsSent) {
         warnings.push('Декларация на RS.GE не отправлена.');
     }
     if (!declarationComparison.valuesMatch && declaration.exists) {
-        warnings.push('Суммы декларации не совпадают с Google Sheets.');
+        warnings.push('Суммы декларации не совпадают с журналом учета.');
     }
     if (declaration.exists && declarationComparison.statusMismatch) {
-        warnings.push('Статус подачи в Google Sheets не совпадает со статусом RS.GE.');
+        warnings.push('Статус подачи в журнале не совпадает со статусом RS.GE.');
     }
     if (!paymentSatisfied) warnings.push('Оплата периода не подтверждена автоматической сверкой.');
     if (!debtClear) warnings.push('На личной карточке есть задолженность или баланс недоступен.');
     if (summary.totalTaxGel > MONEY_TOLERANCE_GEL && !summary.isPaid) {
-        warnings.push('В Google Sheets не отмечена оплата.');
+        warnings.push('В журнале не отмечена оплата.');
     }
 
     if (warnings.length) {
@@ -109,7 +109,7 @@ function buildPeriodCheckReport(result) {
         for (const warning of warnings) lines.push(`• ${warning}`);
     }
 
-    lines.push('', 'Данные на RS.GE и в Google Sheets не изменялись.');
+    lines.push('', 'Данные на RS.GE и в журнале не изменялись.');
     return lines.join('\n');
 }
 

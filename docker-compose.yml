@@ -8,6 +8,7 @@ services:
       - /app/node_modules
       - ./logs:/app/logs
       - ./screenshots:/app/screenshots
+      - ./data:/app/data
     environment:
       - NODE_ENV=production
       - TZ=Asia/Tbilisi

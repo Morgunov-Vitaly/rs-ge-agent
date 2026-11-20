@@ -1,0 +1,16 @@
+.env
+.git
+.git-local
+.agents
+.codex
+.aws
+node_modules
+data
+logs
+screenshots
+session_state.json
+google-credentials.json
+*.png
+.playwright-cli
+test-results
+output

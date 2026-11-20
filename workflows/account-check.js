@@ -45,14 +45,14 @@ function buildAccountCheckReport(periodCheck, reconciliationPreview) {
         reconciliationPreview.summary.portalRowsToInsert > 0
     );
     const lines = [
-        periodCheck.report.replace(/\n\nДанные на RS\.GE и в Google Sheets не изменялись\.$/, ''),
+        periodCheck.report.replace(/\n\nДанные на RS\.GE и в журнале не изменялись\.$/, ''),
         '',
         'История оплат:',
         `• Совпадает: ${formatRussianCount(counts.matched, 'запись', 'записи', 'записей')}`,
         `• Расхождение даты: ${formatRussianCount(counts.dateMismatch, 'запись', 'записи', 'записей')}`,
         `• Расхождение суммы: ${formatRussianCount(counts.amountMismatch, 'запись', 'записи', 'записей')}`,
         `• Не найдено на RS.GE: ${formatRussianCount(counts.missingOnPortal, 'запись', 'записи', 'записей')}`,
-        `• Без даты оплаты в таблице: ${formatRussianCount(unpaid, 'период', 'периода', 'периодов')}`,
+        `• Без даты оплаты в журнале: ${formatRussianCount(unpaid, 'период', 'периода', 'периодов')}`,
         `• Только на RS.GE: ${formatRussianCount(untracked, 'платёж', 'платежа', 'платежей')}`
     ];
 
@@ -61,10 +61,10 @@ function buildAccountCheckReport(periodCheck, reconciliationPreview) {
     } else if (needsReconciliation) {
         lines.push(
             '',
-            'Обнаружены новые или изменившиеся расхождения. Их можно записать в таблицу после отдельного подтверждения.'
+            'Обнаружены новые или изменившиеся расхождения. Их можно записать в журнал после отдельного подтверждения.'
         );
     } else {
-        lines.push('', 'Расхождения уже отражены в Google Sheets; повторная запись не требуется.');
+        lines.push('', 'Расхождения уже отражены в журнале; повторная запись не требуется.');
     }
 
     lines.push('', 'Проверка выполнена в режиме чтения. Данные не изменялись.');

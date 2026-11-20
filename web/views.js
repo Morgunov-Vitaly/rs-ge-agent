@@ -2,6 +2,7 @@ const {
     MONTH_NAMES_RU,
     formatReportPeriod
 } = require('../domain/reporting-period');
+const { parseRecordPeriod } = require('../domain/dates');
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -155,7 +156,7 @@ function sheetStatus(summary) {
 
 function historyRows(history) {
     if (!history.length) {
-        return `<tr><td colspan="5" class="empty-cell">История появится после добавления доходов в Google Sheets.</td></tr>`;
+        return `<tr><td colspan="5" class="empty-cell">История появится после добавления доходов в журнал.</td></tr>`;
     }
     return history.map((item) => `<tr>
         <td><a href="/?year=${item.year}&month=${item.month}">${escapeHtml(item.label)}</a><small>${russianCount(item.recordsCount, 'запись', 'записи', 'записей')}</small></td>
@@ -166,7 +167,8 @@ function historyRows(history) {
     </tr>`).join('');
 }
 
-function dashboardView({ session, dashboard, error = '', now = new Date(), submissionEnabled = false, spreadsheetUrl = '' }) {
+function dashboardView({ session, dashboard, error = '', now = new Date(), submissionEnabled = false,
+    spreadsheetUrl = '', storageDriver = 'sheets' }) {
     const { period, summary, yearSummary, history } = dashboard;
     const status = sheetStatus(summary);
     const currentPeriod = period.year === now.getFullYear() && period.month === now.getMonth() + 1;
@@ -178,7 +180,7 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
                 <div>
                     <p class="eyebrow">Обзор учета</p>
                     <h1>Налоговый период</h1>
-                    <p>${currentPeriod ? 'Доходы текущего месяца накапливаются. Декларацию можно подать после окончания месяца.' : 'Google Sheets показывает плановые суммы. Для подтверждения состояния запустите безопасную проверку RS.GE.'}</p>
+                    <p>${currentPeriod ? 'Доходы текущего месяца накапливаются. Декларацию можно подать после окончания месяца.' : 'Журнал учета показывает плановые суммы. Для подтверждения состояния запустите безопасную проверку RS.GE.'}</p>
                 </div>
                 <form class="period-picker" method="get" action="/">
                     <label for="period">Период</label>
@@ -191,7 +193,7 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
                 <div class="period-verdict">
                     <div class="period-verdict-top">
                         <span class="status-pill status-${status.tone}">${escapeHtml(status.label)}</span>
-                        <span class="source-label">Источник: Google Sheets</span>
+                        <span class="source-label">Источник: ${storageDriver === 'sqlite' ? 'Локальный журнал' : 'Google Sheets'}</span>
                     </div>
                     <div>
                         <p class="eyebrow">${escapeHtml(period.label)}</p>
@@ -212,7 +214,7 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
                         <strong>${money(summary.totalIncomeGel)} <small>GEL</small></strong>
                     </div>
                     <div class="ledger-row">
-                        <span>Налог по таблице</span>
+                        <span>Налог по учету</span>
                         <strong>${money(summary.totalTaxGel)} <small>GEL</small></strong>
                     </div>
                     <div class="ledger-row">
@@ -235,7 +237,7 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
                 <div>
                     <p class="eyebrow">Декларация · ${escapeHtml(period.key)}</p>
                     <h2>${currentPeriod ? 'Декларация после месяца' : summary.isFiled ? 'Декларация отмечена как поданная' : 'Черновик на RS.GE'}</h2>
-                    <p>${currentPeriod ? 'Черновик станет доступен после окончания месяца.' : summary.isFiled ? 'В таблице период отмечен как поданный. <a href="https://decl.rs.ge/decls.aspx" target="_blank" rel="noopener noreferrer">Проверьте его статус в списке деклараций RS.GE ↗</a>' : 'Перед сохранением сверим суммы и попросим явное подтверждение.'} ${submissionEnabled ? 'Финальная отправка требует отдельного подтверждения.' : 'Финальная отправка пока отключена.'}</p>
+                    <p>${currentPeriod ? 'Черновик станет доступен после окончания месяца.' : summary.isFiled ? 'В журнале период отмечен как поданный. <a href="https://decl.rs.ge/decls.aspx" target="_blank" rel="noopener noreferrer">Проверьте его статус в списке деклараций RS.GE ↗</a>' : 'Перед сохранением сверим суммы и попросим явное подтверждение.'} ${submissionEnabled ? 'Финальная отправка требует отдельного подтверждения.' : 'Финальная отправка пока отключена.'}</p>
                     ${!summary.isFiled && !currentPeriod ? `
                     <form method="post" action="/declarations">
                         <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
@@ -259,7 +261,10 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
                         <p class="eyebrow">Журнал</p>
                         <h2 id="history-title">История периодов</h2>
                     </div>
-                    ${spreadsheetUrl ? `<a class="source-label source-link" href="${escapeHtml(spreadsheetUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть Google Таблицу в новой вкладке">${icon('table')} Google Sheets ↗</a>` : `<span class="source-label">${icon('table')} Google Sheets</span>`}
+                    <div class="section-actions">
+                        <a class="button button-secondary" href="/ledger?period=${period.year}-${period.month}">Открыть журнал ${icon('arrow')}</a>
+                        ${spreadsheetUrl ? `<a class="source-label source-link" href="${escapeHtml(spreadsheetUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть Google Таблицу в новой вкладке">${icon('table')} ${storageDriver === 'sqlite' ? 'Архив Google Sheets' : 'Google Sheets'} ↗</a>` : `<span class="source-label">${icon('table')} Локальный журнал</span>`}
+                    </div>
                 </div>
                 <div class="table-wrap">
                     <table>
@@ -272,7 +277,7 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
     });
 }
 
-function incomeView({ session, input = {}, pending = null, saved = null, error = '', now = new Date() }) {
+function incomeView({ session, input = {}, pending = null, saved = null, error = '', now = new Date(), storageDriver = 'sheets' }) {
     const preview = pending?.preview;
     const record = preview?.record || saved?.record;
     const todayParts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
@@ -285,7 +290,7 @@ function incomeView({ session, input = {}, pending = null, saved = null, error =
         body: `<main class="operation-shell income-shell">
             <a class="back-link" href="/">← Обзор</a>
             <section class="operation-card">
-                <p class="eyebrow">Google Sheets · запись после подтверждения</p>
+                <p class="eyebrow">${storageDriver === 'sqlite' ? 'Локальный журнал' : 'Google Sheets'} · запись после подтверждения</p>
                 <h1>${saved ? 'Доход записан' : preview ? 'Проверьте поступление' : 'Добавить доход'}</h1>
                 ${error ? `<div class="notice notice-error" role="alert">${icon('alert')}<span>${escapeHtml(error)}</span></div>` : ''}
                 ${record ? `<div class="result-ledger">
@@ -296,7 +301,7 @@ function incomeView({ session, input = {}, pending = null, saved = null, error =
                     <div><span>Налог на поступление</span><strong>${money(record.taxGel)} GEL</strong></div>
                     <div><span>Оценка налога за месяц</span><strong>${money((preview || saved).estimatedMonthlyTaxGel)} GEL · ${(preview || saved).ratePercent}%</strong></div>
                 </div>` : ''}
-                ${saved ? `<p class="operation-help">Запись добавлена в Google Sheets. Проверьте ее в журнале периода.</p><a class="button button-primary" href="/?year=${record.date.slice(0, 4)}&month=${Number(record.date.slice(5, 7))}">Открыть период</a>` : preview ? `
+                ${saved ? `<p class="operation-help">Запись добавлена в ${storageDriver === 'sqlite' ? 'локальный журнал' : 'Google Sheets'}.</p><a class="button button-primary" href="/ledger?period=${record.date.slice(0, 7)}">Открыть журнал</a>` : preview ? `
                     <p class="operation-help">Дата и курс будут перепроверены перед записью. Если данные изменились, операция остановится.</p>
                     <form method="post" action="/income/confirm" class="decision-actions">
                         <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
@@ -392,7 +397,7 @@ function operationView({ session, operation }) {
                 <p class="lead">${waitingSms
                     ? 'RS.GE отправил одноразовый код на привязанный телефон.'
                     : (pending
-                        ? 'Читаем данные портала и сравниваем их с Google Sheets.'
+                        ? 'Читаем данные портала и сравниваем их с журналом учета.'
                         : (failed
                             ? 'Не удалось получить подтвержденные данные RS.GE. Данные на портале и в таблице не менялись.'
                             : 'Проверка завершена без изменения данных на портале и в таблице.'))}</p>
@@ -450,6 +455,135 @@ function declarationOperationView({ session, operation }) {
     });
 }
 
+function ledgerView({ session, rows, year, month, allPeriods = false, page, totalPages, totals, storageDriver, notice = '', now = new Date() }) {
+    const period = allPeriods ? 'Все периоды' : `${String(month).padStart(2, '0')}.${year}`;
+    const periodQuery = allPeriods ? 'all' : `${year}-${month}`;
+    const tableRows = rows.length ? rows.map((record) => {
+        const income = !record.recordType || record.recordType === 'Доход';
+        const locked = /^(?:sent|подана|გაგზავნილი)$/i.test(String(record.status || '').trim()) ||
+            Boolean(record.reconciliationStatus || record.rsPaymentId);
+        return `<tr>
+            <td><strong>${escapeHtml(displayDate(income ? record.date : record.rsPaymentDate))}</strong><small>№ ${record.id || record.rowIndex - 1}</small></td>
+            <td><strong>${escapeHtml(record.description || '—')}</strong><small>${income ? 'Доход' : 'Платеж RS.GE'}</small></td>
+            <td class="numeric">${income ? `${money(record.amountOriginal)} ${escapeHtml(record.currency)}` : '—'}</td>
+            <td class="numeric">${income ? `${money(record.amountGel)} GEL` : '—'}</td>
+            <td class="numeric">${income ? `${money(record.taxGel)} GEL` : '—'}</td>
+            <td>${escapeHtml(displayDate(record.paymentDate))}</td>
+            <td>${record.rsPaymentAmount !== null && record.rsPaymentAmount !== undefined ? `${money(record.rsPaymentAmount)} GEL` : '—'}<small>${record.rsPaymentDate ? escapeHtml(displayDate(record.rsPaymentDate)) : ''}</small></td>
+            <td>${escapeHtml(record.reconciliationStatus || record.status || '—')}</td>
+            <td>${storageDriver === 'sqlite' && income && !locked ? `<div class="row-actions"><a href="/ledger/${record.id}/edit">Изменить</a><a href="/ledger/${record.id}/delete">Удалить</a></div>` : '<span class="muted">—</span>'}</td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="9" class="empty-cell">За выбранный период записей нет.</td></tr>';
+    return layout({
+        title: `Журнал ${period}`,
+        session,
+        body: `<main class="app-shell ledger-page">
+            <a class="back-link" href="${allPeriods ? '/' : `/?year=${year}&month=${month}`}">← Обзор периода</a>
+            <section class="page-heading">
+                <div><p class="eyebrow">${storageDriver === 'sqlite' ? 'Локальное хранилище' : 'Google Sheets'}</p>
+                    <h1>Журнал учета</h1>
+                    <p>Доходы и данные сверки RS.GE. Записи поданного или сверенного периода защищены от обычного редактирования.</p></div>
+                <form class="period-picker" method="get" action="/ledger">
+                    <label for="ledger-period">Период</label>
+                    <select id="ledger-period" name="period" data-ledger-period-select><option value="all" ${allPeriods ? 'selected' : ''}>Все периоды</option>${periodOptions(year, month, now)}</select>
+                    <noscript><button class="button button-secondary" type="submit">Показать</button></noscript>
+                </form>
+            </section>
+            ${notice ? `<div class="notice notice-success" role="status">${escapeHtml(notice)}</div>` : ''}
+            ${storageDriver !== 'sqlite' ? `<div class="notice notice-warning">Редактирование откроется после проверенного импорта в локальный журнал. Google Таблица пока остается источником данных.</div>` : ''}
+            <div class="ledger-summary">
+                <div><span>Доход</span><strong>${money(totals.incomeGel)} GEL</strong></div>
+                <div><span>Налог</span><strong>${money(totals.taxGel)} GEL</strong></div>
+                <div><span>Поступлений</span><strong>${totals.incomeCount}</strong></div>
+                <div><span>Отдельных платежей RS.GE</span><strong>${totals.portalCount}</strong></div>
+            </div>
+            <div class="ledger-tools"><a class="button button-primary" href="/income">Добавить доход ${icon('arrow')}</a><span>Удаленные записи остаются в защищенной истории изменений.</span></div>
+            <p class="ledger-scroll-hint">Прокрутите таблицу вправо, чтобы увидеть оплату, сверку и действия →</p>
+            <div class="table-wrap ledger-table-wrap"><table class="ledger-table">
+                <thead><tr><th>Дата</th><th>Описание / источник</th><th class="numeric">Сумма</th><th class="numeric">GEL</th><th class="numeric">Налог</th><th>Дата оплаты</th><th>RS.GE оплата</th><th>Сверка / статус</th><th>Действия</th></tr></thead>
+                <tbody>${tableRows}</tbody>
+            </table></div>
+            ${totalPages > 1 ? `<nav class="pagination" aria-label="Страницы журнала">
+                ${page > 1 ? `<a href="/ledger?period=${periodQuery}&page=${page - 1}">← Назад</a>` : '<span></span>'}
+                <span>${page} / ${totalPages}</span>
+                ${page < totalPages ? `<a href="/ledger?period=${periodQuery}&page=${page + 1}">Далее →</a>` : '<span></span>'}
+            </nav>` : ''}
+        </main>`
+    });
+}
+
+function isoInputDate(value) {
+    const parsed = parseRecordPeriod(value);
+    return parsed ? `${parsed.year}-${String(parsed.month).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}` : '';
+}
+
+function displayDate(value) {
+    const parsed = parseRecordPeriod(value);
+    return parsed
+        ? `${String(parsed.day).padStart(2, '0')}.${String(parsed.month).padStart(2, '0')}.${parsed.year}`
+        : value || '—';
+}
+
+function ledgerEditView({ session, record, input = record, error = '', now = new Date() }) {
+    const todayParts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Tbilisi', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(now).map(({ type, value }) => [type, value]));
+    const today = `${todayParts.year}-${todayParts.month}-${todayParts.day}`;
+    return layout({
+        title: 'Изменить доход',
+        session,
+        body: `<main class="operation-shell income-shell">
+            <a class="back-link" href="/ledger?period=${record.date.slice(0, 7)}">← Журнал</a>
+            <section class="operation-card">
+                <p class="eyebrow">Запись № ${record.id} · изменение после подтверждения</p>
+                <h1>Исправить поступление</h1>
+                <p class="lead">Проверьте дату поступления и сумму. Курс NBG и налог будут рассчитаны заново.</p>
+                ${error ? `<div class="notice notice-error" role="alert">${icon('alert')}<span>${escapeHtml(error)}</span></div>` : ''}
+                <form class="form-stack" method="post" action="/ledger/${record.id}/preview">
+                    <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                    <input type="hidden" name="intent" value="edit">
+                    <label>Дата поступления<input name="date" type="date" max="${today}" value="${escapeHtml(isoInputDate(input.date))}" required></label>
+                    <label>Сумма<input name="amount" inputmode="decimal" value="${escapeHtml(input.amount ?? input.amountOriginal)}" required></label>
+                    <label>Валюта<select name="currency">${['USD', 'EUR', 'GEL', 'GBP', 'RUB'].map((code) => `<option value="${code}" ${input.currency === code ? 'selected' : ''}>${code}</option>`).join('')}</select></label>
+                    <label>Описание / источник<input name="description" maxlength="200" value="${escapeHtml(input.description)}" required></label>
+                    <label>Дата оплаты налога, если известна<input name="paymentDate" type="date" max="${today}" value="${escapeHtml(isoInputDate(input.paymentDate))}"></label>
+                    <button class="button button-primary" type="submit">Проверить изменение ${icon('arrow')}</button>
+                </form>
+            </section>
+        </main>`
+    });
+}
+
+function ledgerPreviewView({ session, pending }) {
+    const { preview, token } = pending;
+    const deletion = preview.after === null;
+    return layout({
+        title: deletion ? 'Подтвердить удаление' : 'Проверить изменение',
+        session,
+        body: `<main class="operation-shell">
+            <a class="back-link" href="/ledger?period=${preview.before.date.slice(0, 7)}">← Журнал</a>
+            <section class="operation-card">
+                <p class="eyebrow">Запись № ${preview.id} · ${deletion ? 'удаление' : 'исправление'}</p>
+                <h1>${deletion ? 'Удалить поступление?' : 'Проверьте изменение'}</h1>
+                <p class="lead">${deletion ? 'Запись исчезнет из учета, но ее прежние значения останутся в истории изменений.' : 'Курс и налог пересчитаны по новой дате и сумме.'}</p>
+                <div class="result-ledger">
+                    <div><span>Было</span><strong>${escapeHtml(preview.before.date)} · ${money(preview.before.amountOriginal)} ${escapeHtml(preview.before.currency)} · ${money(preview.before.amountGel)} GEL</strong></div>
+                    <div><span>Станет</span><strong>${deletion ? 'Запись удалена из учета' : `${escapeHtml(preview.after.date)} · ${money(preview.after.amountOriginal)} ${escapeHtml(preview.after.currency)} · ${money(preview.after.amountGel)} GEL`}</strong></div>
+                    <div><span>Доход месяца</span><strong>${money(preview.monthlyBefore)} → ${money(preview.monthlyAfter)} GEL</strong></div>
+                    <div><span>Доход с начала года</span><strong>${money(preview.yearlyBefore)} → ${money(preview.yearlyAfter)} GEL</strong></div>
+                    ${deletion ? '' : `<div><span>Налог на запись</span><strong>${money(preview.before.taxGel)} → ${money(preview.after.taxGel)} GEL</strong></div>`}
+                </div>
+                <form class="decision-actions" method="post" action="/ledger/${preview.id}/confirm">
+                    <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                    <input type="hidden" name="token" value="${escapeHtml(token)}">
+                    <button class="button ${deletion ? 'button-danger' : 'button-primary'}" type="submit">${deletion ? 'Подтвердить удаление' : 'Сохранить изменение'}</button>
+                    <a class="button button-secondary" href="${deletion ? `/ledger?period=${preview.before.date.slice(0, 7)}` : `/ledger/${preview.id}/edit`}">Отмена</a>
+                </form>
+            </section>
+        </main>`
+    });
+}
+
 function errorView({ session, statusCode, title, message }) {
     return layout({
         title,
@@ -469,6 +603,9 @@ module.exports = {
     dashboardView,
     errorView,
     incomeView,
+    ledgerEditView,
+    ledgerPreviewView,
+    ledgerView,
     escapeHtml,
     loginView,
     money,

@@ -1,10 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('stream');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const { loadConfig } = require('../config');
 const { hashPassword } = require('../web/security');
 const { createWebApplication } = require('../web/server');
+const { createSqliteIncomeRepository } = require('../connectors/sqlite/income-repository');
 
 function extractCookie(response, name) {
     const setCookies = Array.isArray(response.headers['set-cookie'])
@@ -196,4 +200,74 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
     } finally {
         app.close();
     }
+});
+
+test('web ledger previews edits and deletion, protects filed periods and requires confirmation', async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rs-ge-web-ledger-'));
+    const repository = createSqliteIncomeRepository({ filePath: path.join(directory, 'ledger.sqlite') });
+    t.after(() => { repository.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+    const current = await repository.addIncomeRecord({
+        date: '2026-11-18', amountOriginal: 100, currency: 'USD', rate: 2.7,
+        amountGel: 270, taxGel: 2.7, description: 'Original', paymentDate: '', status: 'Ожидает подачи'
+    });
+    const filed = await repository.addIncomeRecord({
+        date: '2026-10-18', amountOriginal: 10, currency: 'GEL', rate: 1,
+        amountGel: 10, taxGel: 0.1, description: 'Filed', paymentDate: '2026-11-10', status: 'Подана'
+    });
+    const passwordHash = await hashPassword('ledger-secret', 'web-ledger-salt');
+    const appConfig = loadConfig({
+        STORAGE_DRIVER: 'sqlite', SQLITE_PATH: path.join(directory, 'ledger.sqlite'),
+        WEB_ENABLED: 'true', WEB_USERNAME: 'owner', WEB_PASSWORD_HASH: passwordHash,
+        WEB_SESSION_SECRET: 'ledger-test-session-secret-long-enough', WEB_COOKIE_SECURE: 'false'
+    });
+    const app = createWebApplication({ appConfig, recordsRepository: repository,
+        convertToGel: async (value) => ({ rate: 2.7, amountGel: Number(value) * 2.7 }),
+        appLogger: { error() {}, warn() {} }, now: () => new Date('2026-11-20T12:00:00+04:00') });
+    t.after(() => app.close());
+    const login = await request(app, { url: '/login' });
+    const signedIn = await request(app, { method: 'POST', url: '/login',
+        body: new URLSearchParams({ username: 'owner', password: 'ledger-secret', csrf: extractCsrf(login.body) }) });
+    const cookie = extractCookie(signedIn, 'rsge_session');
+    assert.ok(cookie);
+
+    const ledger = await request(app, { url: '/ledger', cookie });
+    assert.equal(ledger.status, 200);
+    assert.match(ledger.body, /Original/);
+    assert.match(ledger.body, /Filed/);
+    assert.match(ledger.body, new RegExp(`/ledger/${current.id}/edit`));
+    assert.doesNotMatch(ledger.body, new RegExp(`/ledger/${filed.id}/edit`));
+
+    const locked = await request(app, { url: `/ledger/${filed.id}/delete`, cookie });
+    assert.equal(locked.status, 409);
+    const edit = await request(app, { url: `/ledger/${current.id}/edit`, cookie });
+    assert.equal(edit.status, 200);
+    const missingCsrf = await request(app, { method: 'POST', url: `/ledger/${current.id}/preview`, cookie,
+        body: new URLSearchParams({ date: '2026-11-18', amount: '120', currency: 'USD', description: 'Corrected' }) });
+    assert.equal(missingCsrf.status, 403);
+    const previewRequest = await request(app, { method: 'POST', url: `/ledger/${current.id}/preview`, cookie,
+        body: new URLSearchParams({ csrf: extractCsrf(edit.body), date: '2026-11-18',
+            amount: '120', currency: 'USD', description: 'Corrected', paymentDate: '' }) });
+    assert.equal(previewRequest.status, 303);
+    assert.equal((await repository.getRecord(current.id)).amountGel, 270);
+    const preview = await request(app, { url: `/ledger/${current.id}/preview`, cookie });
+    assert.match(preview.body, /324,00/);
+    const token = preview.body.match(/name="token" value="([^"]+)"/)?.[1];
+    const saved = await request(app, { method: 'POST', url: `/ledger/${current.id}/confirm`, cookie,
+        body: new URLSearchParams({ csrf: extractCsrf(preview.body), token }) });
+    assert.equal(saved.status, 303);
+    assert.equal((await repository.getRecord(current.id)).amountGel, 324);
+    assert.equal((await repository.getRecord(current.id)).taxGel, 3.24);
+    assert.equal((await request(app, { method: 'POST', url: `/ledger/${current.id}/confirm`, cookie,
+        body: new URLSearchParams({ csrf: extractCsrf(preview.body), token }) })).status, 409);
+
+    const deleteRequest = await request(app, { url: `/ledger/${current.id}/delete`, cookie });
+    assert.equal(deleteRequest.status, 303);
+    assert.ok(await repository.getRecord(current.id));
+    const deletePreview = await request(app, { url: `/ledger/${current.id}/preview`, cookie });
+    assert.match(deletePreview.body, /Удалить поступление/);
+    const deleteToken = deletePreview.body.match(/name="token" value="([^"]+)"/)?.[1];
+    const deleted = await request(app, { method: 'POST', url: `/ledger/${current.id}/confirm`, cookie,
+        body: new URLSearchParams({ csrf: extractCsrf(deletePreview.body), token: deleteToken }) });
+    assert.equal(deleted.status, 303);
+    assert.equal(await repository.getRecord(current.id), null);
 });

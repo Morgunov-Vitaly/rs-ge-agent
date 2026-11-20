@@ -97,8 +97,8 @@ test('separates a closed portal period from stale Google Sheets status', async (
     assert.equal(result.verdict, 'portal-closed-sheet-mismatch');
     assert.equal(result.portalClosed, true);
     assert.equal(result.recordsConsistent, false);
-    assert.match(result.report, /таблица требует сверки/);
-    assert.match(result.report, /Статус подачи в Google Sheets не совпадает/);
+    assert.match(result.report, /журнал требует сверки/);
+    assert.match(result.report, /Статус подачи в журнале не совпадает/);
 });
 
 test('requires attention when the declaration is not sent and debt remains', async () => {
@@ -132,7 +132,7 @@ test('explains a missing portal declaration as one consolidated warning', async 
     assert.equal(result.verdict, 'attention');
     assert.match(
         result.report,
-        /не нашла декларацию на RS\.GE, хотя в Google Sheets она отмечена как поданна/
+        /не нашла декларацию на RS\.GE, хотя в журнале она отмечена как поданна/
     );
-    assert.doesNotMatch(result.report, /Статус подачи в Google Sheets не совпадает/);
+    assert.doesNotMatch(result.report, /Статус подачи в журнале не совпадает/);
 });

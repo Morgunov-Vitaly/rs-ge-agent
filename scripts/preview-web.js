@@ -6,7 +6,9 @@ const records = [
     { date: '2026-10-04', amountGel: 3105, taxGel: 31.05, paymentDate: '17.11.2026', status: 'Подана' },
     { date: '2026-10-18', amountGel: 4172.76, taxGel: 41.73, paymentDate: '17.11.2026', status: 'Подана' },
     { date: '2026-09-12', amountGel: 6840.5, taxGel: 68.41, paymentDate: '15.10.2026', status: 'Подана' },
-    { date: '2026-08-15', amountGel: 5920, taxGel: 59.2, paymentDate: '16.09.2026', status: 'Подана' }
+    { date: '2026-08-15', amountGel: 5920, taxGel: 59.2, paymentDate: '16.09.2026', status: 'Подана' },
+    { date: '2026-11-18', amountOriginal: 1250, currency: 'USD', rate: 2.7,
+        amountGel: 3375, taxGel: 33.75, paymentDate: '', status: 'Ожидает подачи', description: 'Ноябрьский контракт' }
 ];
 
 function forMonth(year, month) {
@@ -29,6 +31,12 @@ async function main() {
         WEB_COOKIE_SECURE: 'false'
     });
     const recordsRepository = {
+        driver: 'sqlite',
+        async getAllRecords() {
+            return records.map((record, index) => ({ id: index + 1, rowIndex: index + 2,
+                recordType: 'Доход', currency: 'GEL', amountOriginal: record.amountGel,
+                description: 'Договор об оказании услуг', ...record }));
+        },
         async getIncomeRecords() {
             return records;
         },

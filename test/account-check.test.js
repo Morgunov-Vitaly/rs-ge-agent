@@ -8,7 +8,7 @@ const {
 
 function createPeriodCheck(overrides = {}) {
     return {
-        report: '✅ Период 10.2026 закрыт\n\nДанные на RS.GE и в Google Sheets не изменялись.',
+        report: '✅ Период 10.2026 закрыт\n\nДанные на RS.GE и в журнале не изменялись.',
         reconciliation: {
             results: [{ status: 'date_mismatch' }, { status: 'matched' }],
             unpaidPeriods: [],
@@ -27,7 +27,7 @@ test('unified account check recommends reconciliation only for unwritten changes
     assert.equal(result.needsReconciliation, true);
     assert.match(result.report, /История оплат/);
     assert.match(result.report, /Расхождение даты: 1 запись/);
-    assert.match(result.report, /можно записать в таблицу/);
+    assert.match(result.report, /можно записать в журнал/);
     assert.doesNotMatch(result.report, /автоматически не изменялись/);
 });
 
@@ -43,5 +43,5 @@ test('unified account check does not offer a redundant write', () => {
     });
 
     assert.equal(result.needsReconciliation, false);
-    assert.match(result.report, /уже отражены в Google Sheets/);
+    assert.match(result.report, /уже отражены в журнале/);
 });

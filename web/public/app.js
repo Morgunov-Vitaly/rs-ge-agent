@@ -7,6 +7,13 @@
         });
     }
 
+    const ledgerSelect = document.querySelector('[data-ledger-period-select]');
+    if (ledgerSelect) {
+        ledgerSelect.addEventListener('change', () => {
+            window.location.assign(`/ledger?period=${encodeURIComponent(ledgerSelect.value)}`);
+        });
+    }
+
     const operation = document.querySelector('[data-operation-id]');
     if (!operation) return;
     const operationId = operation.dataset.operationId;

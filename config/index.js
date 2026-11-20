@@ -64,6 +64,10 @@ function loadConfig(env = process.env) {
             spreadsheetId: env.GOOGLE_SPREADSHEET_ID || '',
             credentialsPath: path.resolve(env.GOOGLE_CREDENTIALS_PATH || './google-credentials.json')
         }),
+        storage: Object.freeze({
+            driver: env.STORAGE_DRIVER || (env.GOOGLE_SPREADSHEET_ID ? 'sheets' : 'sqlite'),
+            sqlitePath: path.resolve(env.SQLITE_PATH || './data/rs-ge.sqlite')
+        }),
         runtime: Object.freeze({
             logsDir,
             auditLogPath: path.resolve(env.AUDIT_LOG_PATH || path.join(logsDir, 'audit.jsonl')),
@@ -103,6 +107,9 @@ function assertConfig(config, scopes) {
     if (requested.has('google')) {
         if (!config.google.spreadsheetId) missing.push('GOOGLE_SPREADSHEET_ID');
         if (!config.google.credentialsPath) missing.push('GOOGLE_CREDENTIALS_PATH');
+    }
+    if (requested.has('storage') && !['sqlite', 'sheets'].includes(config.storage.driver)) {
+        missing.push('STORAGE_DRIVER (sqlite или sheets)');
     }
     if (
         requested.has('submission') &&
