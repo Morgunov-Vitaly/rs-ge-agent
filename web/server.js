@@ -14,6 +14,7 @@ const smallBusinessModule = require('../modules/small-business/manifest');
 const logger = require('../services/logger');
 const nbg = require('../services/nbg');
 const playwright = require('../services/playwright');
+const { getPaymentDetails } = require('../services/rules');
 const { executeAccountCheck } = require('../workflows/account-check');
 const { loadDashboard } = require('./dashboard');
 const { createOperationManager } = require('./operations');
@@ -81,6 +82,7 @@ function createWebApplication({
     recordsRepository ||= createIncomeRepository({ appConfig });
     const secureCookies = appConfig.web.secureCookies;
     const storageDriver = recordsRepository.driver || appConfig.storage.driver;
+    const paymentDetails = getPaymentDetails();
     const spreadsheetUrl = /^[A-Za-z0-9_-]+$/.test(appConfig.google.spreadsheetId)
         ? `https://docs.google.com/spreadsheets/d/${appConfig.google.spreadsheetId}/edit`
         : '';
@@ -265,7 +267,7 @@ function createWebApplication({
                     month: period.month,
                     now: currentDate
                 });
-                return send(response, 200, dashboardView({ session, dashboard, now: currentDate, submissionEnabled: appConfig.rsGe.enableSubmission, spreadsheetUrl, storageDriver }));
+                return send(response, 200, dashboardView({ session, dashboard, now: currentDate, submissionEnabled: appConfig.rsGe.enableSubmission, spreadsheetUrl, storageDriver, paymentDetails }));
             } catch (error) {
                 appLogger.error('Web dashboard failed:', error);
                 const fallback = {
@@ -281,7 +283,8 @@ function createWebApplication({
                     now: currentDate,
                     submissionEnabled: appConfig.rsGe.enableSubmission,
                     spreadsheetUrl,
-                    storageDriver
+                    storageDriver,
+                    paymentDetails
                 }));
             }
         }

@@ -16,6 +16,7 @@ Use [GitHub private vulnerability reporting](https://github.com/Morgunov-Vitaly/
 - Telegram bot tokens;
 - RS.GE username/password or service-user credentials;
 - screenshots and exported taxpayer documents;
+- SQLite databases and CSV/XLSX ledger exports;
 - `logs/`, including the audit log from a real deployment.
 
 If any of these files are exposed, revoke/rotate the affected credential and invalidate the RS.GE session; removing the file from the latest commit is not sufficient.
@@ -37,17 +38,17 @@ All actions declare a risk class in `core/action-contract.js`:
 
 - `READ_ONLY`;
 - `DRAFT_WRITE`;
+- `DATA_WRITE`;
 - `IRREVERSIBLE`;
-- `EXTERNAL_PAYMENT`.
 
-Only `READ_ONLY` actions may execute without explicit user confirmation. Future write actions must implement preview, confirmation, idempotency and proof of completion before being registered in a module manifest.
+Only `READ_ONLY` actions may execute without explicit user confirmation. Write actions use preview, confirmation and idempotency; irreversible submission additionally verifies `Sent` and stores encrypted evidence. The payment link merely opens the official RS.GE page; the agent does not initiate a payment.
 
 ## Current limitations
 
 - RS.GE credentials and browser session state are not yet encrypted by the application itself.
 - The current runtime is single-user.
 - Browser automation depends on the live RS.GE interface and must be treated as an untrusted external dependency.
-- Evidence artifacts are isolated from automatic cleanup but are not encrypted by the application yet.
-- The planned Web UI does not yet have an authentication or session-security implementation.
+- Evidence artifacts are encrypted with AES-256-GCM when final submission is enabled, but their separate retention policy is not yet implemented.
+- The Web UI has local password authentication, signed sessions, CSRF protection and login rate limiting; it has no multi-user roles or public-hosting hardening.
 
 Do not operate a public multi-tenant service until these limitations are addressed and a threat model has been reviewed.

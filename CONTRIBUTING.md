@@ -18,7 +18,7 @@ The project is licensed under `AGPL-3.0-only`. Before substantial external contr
 - `workflows/` — use cases over connector interfaces;
 - `connectors/` — external systems and persistence adapters;
 - `modules/` — manifests of user-visible capabilities;
-- `infrastructure/` — audit, scheduling, queues and secret storage;
+- `infrastructure/` — audit, backups, runtime cleanup and encrypted evidence;
 - `services/bot.js` — Telegram transport only;
 - `services/playwright.js` — legacy RS.GE browser adapter implementation.
 

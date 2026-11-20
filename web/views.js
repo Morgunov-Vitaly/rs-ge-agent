@@ -168,7 +168,7 @@ function historyRows(history) {
 }
 
 function dashboardView({ session, dashboard, error = '', now = new Date(), submissionEnabled = false,
-    spreadsheetUrl = '', storageDriver = 'sheets' }) {
+    spreadsheetUrl = '', storageDriver = 'sheets', paymentDetails }) {
     const { period, summary, yearSummary, history } = dashboard;
     const status = sheetStatus(summary);
     const currentPeriod = period.year === now.getFullYear() && period.month === now.getMonth() + 1;
@@ -231,7 +231,7 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
                 <div>
                     <p class="eyebrow">Учет доходов</p>
                     <h2>Новое поступление</h2>
-                    <p>Введите дату, сумму и источник. Покажем курс NBG и итог в GEL до записи в таблицу.</p>
+                    <p>Введите дату, сумму и источник. Покажем курс NBG и итог в GEL до записи в журнал.</p>
                     <a class="button button-secondary" href="/income">Добавить доход ${icon('arrow')}</a>
                 </div>
                 <div>
@@ -255,6 +255,15 @@ function dashboardView({ session, dashboard, error = '', now = new Date(), submi
                     </form>` : ''}
                 </div>
             </section>
+            ${!currentPeriod && paymentDetails ? `<section class="payment-panel" aria-labelledby="payment-title">
+                <div>
+                    <p class="eyebrow">Оплата · ${escapeHtml(period.key)}</p>
+                    <h2 id="payment-title">Оплата налога</h2>
+                    <p>По журналу рассчитано ${money(summary.totalTaxGel)} GEL. ${summary.isPaid ? 'Оплата уже отмечена в журнале; перед повторным платежом проверьте личную карточку RS.GE.' : 'Перед платежом проверьте начисление и баланс в личной карточке RS.GE.'}</p>
+                    <p class="payment-code">Единый казначейский код: <strong>${escapeHtml(paymentDetails.treasuryCode)}</strong>. При оплате укажите свой ИНН.</p>
+                </div>
+                <a class="button button-secondary" href="${escapeHtml(paymentDetails.paymentUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть официальный раздел оплаты RS.GE в новой вкладке">Открыть оплату на RS.GE ↗</a>
+            </section>` : ''}
             <section class="history-section" aria-labelledby="history-title">
                 <div class="section-heading">
                     <div>

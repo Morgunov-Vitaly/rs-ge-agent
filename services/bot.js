@@ -959,13 +959,13 @@ bot.hears(['📊 Статус за месяц', '/status'], async (ctx) => {
         let msg = `📅 *Отчетный период: ${String(reportMonth).padStart(2, '0')}.${reportYear}*\n\n` +
             `• Записей в журнале: ${reportSummary.recordsCount}\n` +
             `• Доход: *${reportSummary.totalIncomeGel.toFixed(2)} GEL*\n` +
-            `• Налог 1%: *${reportSummary.totalTaxGel.toFixed(2)} GEL*\n` +
+            `• Налог по журналу: *${reportSummary.totalTaxGel.toFixed(2)} GEL*\n` +
             `• Статус: _${reportSummary.status}_\n` +
             `• Оплата: _${paymentStatus}_\n` +
             `• Доход с начала ${reportYear} года: *${yearSummary.totalIncomeGel.toFixed(2)} GEL*\n\n` +
             `🗓 *Календарь подачи:*\n${periodInfo.message}\n\n` +
             `📈 *Текущий месяц (${String(curMonth).padStart(2, '0')}.${curYear}):*\n` +
-            `• Доход: ${curSummary.totalIncomeGel.toFixed(2)} GEL (налог 1%: ${curSummary.totalTaxGel.toFixed(2)} GEL)`;
+            `• Доход: ${curSummary.totalIncomeGel.toFixed(2)} GEL (налог по журналу: ${curSummary.totalTaxGel.toFixed(2)} GEL)`;
 
         await ctx.replyWithMarkdown(msg);
     } catch (err) {
@@ -994,8 +994,7 @@ bot.hears(['💳 Оплатить налог', '/pay'], async (ctx) => {
             );
         }
 
-        const taxPayerId = config.rsGe.username;
-        const details = rules.getPaymentDetails(taxPayerId, reportSummary.totalTaxGel);
+        const details = rules.getPaymentDetails('', reportSummary.totalTaxGel);
 
         await ctx.reply(details.instructions, Markup.inlineKeyboard([
             [Markup.button.url('💳 Оплатить картой на RS.GE', details.paymentUrl)]

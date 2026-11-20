@@ -150,6 +150,10 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
         assert.match(dashboardHtml, /Подтверждение перед записью/);
         assert.match(dashboardHtml, /href="https:\/\/docs\.google\.com\/spreadsheets\/d\/demo_sheet_123\/edit"/);
         assert.match(dashboardHtml, /href="https:\/\/decl\.rs\.ge\/decls\.aspx"/);
+        assert.match(dashboardHtml, /href="https:\/\/www\.rs\.ge\/ePaymentTabOne-EN"/);
+        assert.match(dashboardHtml, /По журналу рассчитано 10,00 GEL/);
+        assert.match(dashboardHtml, /перед повторным платежом проверьте личную карточку RS\.GE/);
+        assert.match(dashboardHtml, /101001000/);
         assert.match(dashboardHtml, /<span class="brand-mark"><svg/);
         const currentMonth = await request(app, {
             url: '/?year=2026&month=11', cookie: sessionCookie
@@ -158,6 +162,7 @@ test('web server protects dashboard, login, CSRF and session cookies', async () 
         assert.match(currentMonth.body, /Доходы месяца накапливаются/);
         assert.doesNotMatch(currentMonth.body, /action="\/declarations"/);
         assert.doesNotMatch(currentMonth.body, /action="\/checks"/);
+        assert.doesNotMatch(currentMonth.body, /class="payment-panel"/);
 
         const noCsrf = await request(app, {
             method: 'POST',
